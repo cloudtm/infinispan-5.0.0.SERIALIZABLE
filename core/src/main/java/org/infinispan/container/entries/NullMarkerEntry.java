@@ -47,7 +47,7 @@ public class NullMarkerEntry extends NullMarkerEntryForRemoval {
     * A no-op.
     */
    @Override
-   public final void copyForUpdate(DataContainer d, boolean b) {
+   public final void copyForUpdate(DataContainer d, boolean b, boolean b1) {
       // no op
    }
 }

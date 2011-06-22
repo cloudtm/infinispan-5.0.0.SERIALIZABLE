@@ -87,6 +87,14 @@ public class InterceptorChainFactory extends AbstractNamedCacheComponentFactory 
       if (invocationBatching)
          interceptorChain.appendInterceptor(createInterceptor(InvocationContextInterceptor.class));
 
+       if(configuration.isTotalOrderReplication()) {
+           if(configuration.getCacheMode().isReplicated()) {
+               interceptorChain.appendInterceptor(createInterceptor(TotalOrderInterceptor.class));
+           } else {
+               interceptorChain.appendInterceptor(createInterceptor(DistTotalOrderInterceptor.class));
+           }
+       }
+
       // load the cache management interceptor next
       if (configuration.isExposeJmxStatistics())
          interceptorChain.appendInterceptor(createInterceptor(CacheMgmtInterceptor.class));

@@ -32,6 +32,7 @@ import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
 
 import java.util.Collections;
+import java.util.Map;
 import java.util.Set;
 
 
@@ -41,144 +42,161 @@ import java.util.Set;
  * @since 4.0
  */
 public class RemoveCommand extends AbstractDataWriteCommand {
-   private static final Log log = LogFactory.getLog(RemoveCommand.class);
-   public static final byte COMMAND_ID = 10;
-   protected CacheNotifier notifier;
-   boolean successful = true;
-   boolean nonExistent = false;
+    private static final Log log = LogFactory.getLog(RemoveCommand.class);
+    public static final byte COMMAND_ID = 10;
+    protected CacheNotifier notifier;
+    boolean successful = true;
+    boolean nonExistent = false;
+    private boolean remoteWriteSkew = false;
+    private Object originalValue;
 
-   /**
-    * When not null, value indicates that the entry should only be removed if the key is mapped to this value. By the
-    * time the RemoveCommand needs to be marshalled, the condition must have been true locally already, so there's no
-    * need to marshall the value. *
-    */
-   protected transient Object value;
+    /**
+     * When not null, value indicates that the entry should only be removed if the key is mapped to this value. By the
+     * time the RemoveCommand needs to be marshalled, the condition must have been true locally already, so there's no
+     * need to marshall the value. *
+     */
+    protected transient Object value;
 
-   public RemoveCommand(Object key, Object value, CacheNotifier notifier, Set<Flag> flags) {
-      super(key, flags);
-      this.value = value;
-      this.notifier = notifier;
-   }
+    public RemoveCommand(Object key, Object value, CacheNotifier notifier, Set<Flag> flags) {
+        super(key, flags);
+        this.value = value;
+        this.notifier = notifier;
+    }
 
-   public void init(CacheNotifier notifier) {
-      this.notifier = notifier;
-   }
+    public void init(CacheNotifier notifier) {
+        this.notifier = notifier;
+    }
 
-   public RemoveCommand() {
-   }
+    public RemoveCommand() {
+    }
 
-   public Object acceptVisitor(InvocationContext ctx, Visitor visitor) throws Throwable {
-      return visitor.visitRemoveCommand(ctx, this);
-   }
+    public Object acceptVisitor(InvocationContext ctx, Visitor visitor) throws Throwable {
+        return visitor.visitRemoveCommand(ctx, this);
+    }
 
-   public Object perform(InvocationContext ctx) throws Throwable {
-      CacheEntry e = ctx.lookupEntry(key);
-      if (e == null || e.isNull()) {
-         nonExistent = true;
-         log.trace("Nothing to remove since the entry is null or we have a null entry");
-         if (value == null) {
-            return null;
-         } else {
+    public Object perform(InvocationContext ctx) throws Throwable {
+        CacheEntry e = ctx.lookupEntry(key);
+        if (e == null || e.isNull()) {
+            nonExistent = true;
+            log.trace("Nothing to remove since the entry is null or we have a null entry");
+            if (value == null) {
+                return null;
+            } else {
+                successful = false;
+                return false;
+            }
+        }
+
+        if (!(e instanceof MVCCEntry)) {
+            ctx.putLookedUpEntry(key, null);
+        } else if(remoteWriteSkew = ((MVCCEntry) e).isRemoteWriteSkewNeeded()) {
+            originalValue = e.getValue();
+        }
+
+        if (value != null && e.getValue() != null && !e.getValue().equals(value)) {
             successful = false;
             return false;
-         }
-      }
+        }
 
-      if (!(e instanceof MVCCEntry)) ctx.putLookedUpEntry(key, null);
-
-      if (value != null && e.getValue() != null && !e.getValue().equals(value)) {
-         successful = false;
-         return false;
-      }
-
-      final Object removedValue = e.getValue();
-      notify(ctx, removedValue, true);
-      e.setRemoved(true);
-      e.setValid(false);
+        final Object removedValue = e.getValue();
+        notify(ctx, removedValue, true);
+        e.setRemoved(true);
+        e.setValid(false);
 
 
-      // Eviction has no notion of pre/post event since 4.2.0.ALPHA4.
-      // EvictionManagerImpl.onEntryEviction() triggers both pre and post events
-      // with non-null values, so we should do the same here as an ugly workaround.
-      if (this instanceof EvictCommand) {
-         e.setEvicted(true);
-         notify(ctx, removedValue, false);
-      } else {
-         // FIXME: Do we really need to notify with null when a user can be given with more information?
-         notify(ctx, null, false);
-      }
-      return value == null ? removedValue : true;
-   }
+        // Eviction has no notion of pre/post event since 4.2.0.ALPHA4.
+        // EvictionManagerImpl.onEntryEviction() triggers both pre and post events
+        // with non-null values, so we should do the same here as an ugly workaround.
+        if (this instanceof EvictCommand) {
+            e.setEvicted(true);
+            notify(ctx, removedValue, false);
+        } else {
+            // FIXME: Do we really need to notify with null when a user can be given with more information?
+            notify(ctx, null, false);
+        }
+        return value == null ? removedValue : true;
+    }
 
-   protected void notify(InvocationContext ctx, Object value, boolean isPre) {
-      notifier.notifyCacheEntryRemoved(key, value, isPre, ctx);
-   }
+    protected void notify(InvocationContext ctx, Object value, boolean isPre) {
+        notifier.notifyCacheEntryRemoved(key, value, isPre, ctx);
+    }
 
-   public byte getCommandId() {
-      return COMMAND_ID;
-   }
+    public byte getCommandId() {
+        return COMMAND_ID;
+    }
 
-   @Override
-   public boolean equals(Object o) {
-      if (this == o) {
-         return true;
-      }
-      if (!(o instanceof RemoveCommand)) {
-         return false;
-      }
-      if (!super.equals(o)) {
-         return false;
-      }
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof RemoveCommand)) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
 
-      RemoveCommand that = (RemoveCommand) o;
+        RemoveCommand that = (RemoveCommand) o;
 
-      if (value != null ? !value.equals(that.value) : that.value != null) {
-         return false;
-      }
+        if (value != null ? !value.equals(that.value) : that.value != null) {
+            return false;
+        }
 
-      return true;
-   }
+        return true;
+    }
 
-   @Override
-   public int hashCode() {
-      int result = super.hashCode();
-      result = 31 * result + (value != null ? value.hashCode() : 0);
-      return result;
-   }
+    @Override
+    public int hashCode() {
+        int result = super.hashCode();
+        result = 31 * result + (value != null ? value.hashCode() : 0);
+        return result;
+    }
 
 
-   @Override
-   public String toString() {
-      return new StringBuilder()
-         .append("RemoveCommand{key=")
-         .append(key)
-         .append(", value=").append(value)
-         .append(", flags=").append(flags)
-         .append("}")
-         .toString();
-   }
+    @Override
+    public String toString() {
+        return new StringBuilder()
+                .append("RemoveCommand{key=")
+                .append(key)
+                .append(", value=").append(value)
+                .append(", flags=").append(flags)
+                .append("}")
+                .toString();
+    }
 
-   public boolean isSuccessful() {
-      return successful;
-   }
+    public boolean isSuccessful() {
+        return successful;
+    }
 
-   public boolean isConditional() {
-      return value != null;
-   }
+    public boolean isConditional() {
+        return value != null;
+    }
 
-   public boolean isNonExistent() {
-      return nonExistent;
-   }
+    public boolean isNonExistent() {
+        return nonExistent;
+    }
 
-   @Override
-   public void setParameters(int commandId, Object[] parameters) {
-      if (commandId != COMMAND_ID) throw new IllegalStateException("Invalid method id");
-      key = parameters[0];
-      flags = (Set<Flag>) (parameters.length>1 ? parameters[1] : Collections.EMPTY_SET); //TODO remove conditional check in future - eases migration for now
-   }
+    @Override
+    public void setParameters(int commandId, Object[] parameters) {
+        if (commandId != COMMAND_ID) throw new IllegalStateException("Invalid method id");
+        key = parameters[0];
+        remoteWriteSkew = (Boolean) parameters[1];
+        originalValue = parameters[2];
+        flags = (Set<Flag>) (parameters.length>3 ? parameters[3] : Collections.EMPTY_SET); //TODO remove conditional check in future - eases migration for now
+    }
 
-   @Override
-   public Object[] getParameters() {
-      return new Object[]{key, flags};
-   }
+    @Override
+    public Object[] getParameters() {
+        return new Object[]{key, remoteWriteSkew, originalValue, flags};
+    }
+
+    @Override
+    public Map<Object, Object> getKeyAndValuesForWriteSkewCheck() {
+        if(remoteWriteSkew) {
+            return Collections.singletonMap(key, originalValue);
+        } else {
+            return Collections.emptyMap();
+        }
+    }
 }

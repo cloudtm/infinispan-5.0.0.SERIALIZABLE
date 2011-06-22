@@ -30,6 +30,8 @@ import org.infinispan.util.logging.LogFactory;
 
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Map;
 
 
 /**
@@ -165,4 +167,9 @@ public class InvalidateCommand extends RemoveCommand {
       result = 31 * result + (keys != null ? Arrays.hashCode(keys) : 0);
       return result;
    }
+
+    @Override
+    public Map<Object, Object> getKeyAndValuesForWriteSkewCheck() {
+        return Collections.emptyMap();
+    }
 }

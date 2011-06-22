@@ -28,6 +28,7 @@ import org.infinispan.commands.control.LockControlCommand;
 import org.infinispan.commands.tx.CommitCommand;
 import org.infinispan.commands.tx.PrepareCommand;
 import org.infinispan.commands.tx.RollbackCommand;
+import org.infinispan.commands.tx.TotalOrderPrepareCommand;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.interceptors.base.CommandInterceptor;
@@ -42,33 +43,39 @@ import org.infinispan.interceptors.base.CommandInterceptor;
  * @since 4.0
  */
 public class CallInterceptor extends CommandInterceptor {
-   @Override
-   public Object visitPrepareCommand(TxInvocationContext ctx, PrepareCommand command) throws Throwable {
-      if (trace) log.trace("Suppressing invocation of method handlePrepareCommand.");
-      return null;
-   }
+    @Override
+    public Object visitPrepareCommand(TxInvocationContext ctx, PrepareCommand command) throws Throwable {
+        if (trace) log.trace("Suppressing invocation of method handlePrepareCommand.");
+        return null;
+    }
 
-   @Override
-   public Object visitCommitCommand(TxInvocationContext ctx, CommitCommand command) throws Throwable {
-      if (trace) log.trace("Suppressing invocation of method handleCommitCommand.");
-      return null;
-   }
+    @Override
+    public Object visitCommitCommand(TxInvocationContext ctx, CommitCommand command) throws Throwable {
+        if (trace) log.trace("Suppressing invocation of method handleCommitCommand.");
+        return null;
+    }
 
-   @Override
-   public Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable {
-      if (trace) log.trace("Suppressing invocation of method handleRollbackCommand.");
-      return null;
-   }
+    @Override
+    public Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable {
+        if (trace) log.trace("Suppressing invocation of method handleRollbackCommand.");
+        return null;
+    }
 
-   @Override
-   public Object visitLockControlCommand(TxInvocationContext ctx, LockControlCommand c) throws Throwable {
-      if (trace) log.trace("Suppressing invocation of method handleLockControlCommand.");
-      return null;
-   }
+    @Override
+    public Object visitLockControlCommand(TxInvocationContext ctx, LockControlCommand c) throws Throwable {
+        if (trace) log.trace("Suppressing invocation of method handleLockControlCommand.");
+        return null;
+    }
 
-   @Override
-   final public Object handleDefault(InvocationContext ctx, VisitableCommand command) throws Throwable {
-      if (trace) log.trace("Executing command: " + command + ".");
-      return command.perform(ctx);
-   }
+    @Override
+    final public Object handleDefault(InvocationContext ctx, VisitableCommand command) throws Throwable {
+        if (trace) log.trace("Executing command: " + command + ".");
+        return command.perform(ctx);
+    }
+
+    @Override
+    public Object visitTotalOrderPrepareCommand(TxInvocationContext ctx, TotalOrderPrepareCommand command) throws Throwable {
+        if (trace) log.trace("Suppressing invocation of method handleTotalOrderPrepareCommand.");
+        return null;
+    }
 }

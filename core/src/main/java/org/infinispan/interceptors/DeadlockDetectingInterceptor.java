@@ -25,6 +25,7 @@ package org.infinispan.interceptors;
 import org.infinispan.commands.VisitableCommand;
 import org.infinispan.commands.control.LockControlCommand;
 import org.infinispan.commands.tx.PrepareCommand;
+import org.infinispan.commands.tx.TotalOrderPrepareCommand;
 import org.infinispan.commands.write.PutKeyValueCommand;
 import org.infinispan.commands.write.RemoveCommand;
 import org.infinispan.commands.write.ReplaceCommand;
@@ -101,8 +102,16 @@ public class DeadlockDetectingInterceptor extends CommandInterceptor {
       return result;
    }
 
+    //pedro
 
-   private Object handleDataCommand(InvocationContext ctx, VisitableCommand command) throws Throwable {
+
+    @Override
+    public Object visitTotalOrderPrepareCommand(TxInvocationContext ctx, TotalOrderPrepareCommand command) throws Throwable {
+        //we don't have deadlock between a remote and any other transaction
+        return invokeNextInterceptor(ctx, command);
+    }
+
+    private Object handleDataCommand(InvocationContext ctx, VisitableCommand command) throws Throwable {
       return invokeNextInterceptor(ctx, command);
    }
 }

@@ -23,23 +23,9 @@
 package org.infinispan.commands;
 
 import org.infinispan.commands.control.LockControlCommand;
-import org.infinispan.commands.read.DistributedExecuteCommand;
-import org.infinispan.commands.read.EntrySetCommand;
-import org.infinispan.commands.read.GetKeyValueCommand;
-import org.infinispan.commands.read.KeySetCommand;
-import org.infinispan.commands.read.SizeCommand;
-import org.infinispan.commands.read.ValuesCommand;
-import org.infinispan.commands.tx.CommitCommand;
-import org.infinispan.commands.tx.PrepareCommand;
-import org.infinispan.commands.tx.RollbackCommand;
-import org.infinispan.commands.write.ClearCommand;
-import org.infinispan.commands.write.EvictCommand;
-import org.infinispan.commands.write.InvalidateCommand;
-import org.infinispan.commands.write.InvalidateL1Command;
-import org.infinispan.commands.write.PutKeyValueCommand;
-import org.infinispan.commands.write.PutMapCommand;
-import org.infinispan.commands.write.RemoveCommand;
-import org.infinispan.commands.write.ReplaceCommand;
+import org.infinispan.commands.read.*;
+import org.infinispan.commands.tx.*;
+import org.infinispan.commands.write.*;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
 
@@ -50,49 +36,53 @@ import org.infinispan.context.impl.TxInvocationContext;
  */
 
 public interface Visitor {
-   // write commands
+    // write commands
 
-   Object visitPutKeyValueCommand(InvocationContext ctx, PutKeyValueCommand command) throws Throwable;
+    Object visitPutKeyValueCommand(InvocationContext ctx, PutKeyValueCommand command) throws Throwable;
 
-   Object visitRemoveCommand(InvocationContext ctx, RemoveCommand command) throws Throwable;
+    Object visitRemoveCommand(InvocationContext ctx, RemoveCommand command) throws Throwable;
 
-   Object visitReplaceCommand(InvocationContext ctx, ReplaceCommand command) throws Throwable;
+    Object visitReplaceCommand(InvocationContext ctx, ReplaceCommand command) throws Throwable;
 
-   Object visitClearCommand(InvocationContext ctx, ClearCommand command) throws Throwable;
+    Object visitClearCommand(InvocationContext ctx, ClearCommand command) throws Throwable;
 
-   Object visitPutMapCommand(InvocationContext ctx, PutMapCommand command) throws Throwable;
+    Object visitPutMapCommand(InvocationContext ctx, PutMapCommand command) throws Throwable;
 
-   Object visitEvictCommand(InvocationContext ctx, EvictCommand command) throws Throwable;
+    Object visitEvictCommand(InvocationContext ctx, EvictCommand command) throws Throwable;
 
-   // read commands
+    // read commands
 
-   Object visitSizeCommand(InvocationContext ctx, SizeCommand command) throws Throwable;
+    Object visitSizeCommand(InvocationContext ctx, SizeCommand command) throws Throwable;
 
-   Object visitGetKeyValueCommand(InvocationContext ctx, GetKeyValueCommand command) throws Throwable;
+    Object visitGetKeyValueCommand(InvocationContext ctx, GetKeyValueCommand command) throws Throwable;
 
-   Object visitKeySetCommand(InvocationContext ctx, KeySetCommand command) throws Throwable;
+    Object visitKeySetCommand(InvocationContext ctx, KeySetCommand command) throws Throwable;
 
-   Object visitValuesCommand(InvocationContext ctx, ValuesCommand command) throws Throwable;
+    Object visitValuesCommand(InvocationContext ctx, ValuesCommand command) throws Throwable;
 
-   Object visitEntrySetCommand(InvocationContext ctx, EntrySetCommand command) throws Throwable;
+    Object visitEntrySetCommand(InvocationContext ctx, EntrySetCommand command) throws Throwable;
 
-   // tx commands
+    // tx commands
 
-   Object visitPrepareCommand(TxInvocationContext ctx, PrepareCommand command) throws Throwable;
+    Object visitPrepareCommand(TxInvocationContext ctx, PrepareCommand command) throws Throwable;
 
-   Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable;
+    Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable;
 
-   Object visitCommitCommand(TxInvocationContext ctx, CommitCommand command) throws Throwable;
+    Object visitCommitCommand(TxInvocationContext ctx, CommitCommand command) throws Throwable;
 
-   Object visitInvalidateCommand(InvocationContext ctx, InvalidateCommand invalidateCommand) throws Throwable;
-   
-   Object visitInvalidateL1Command(InvocationContext ctx, InvalidateL1Command invalidateL1Command) throws Throwable;
+    Object visitInvalidateCommand(InvocationContext ctx, InvalidateCommand invalidateCommand) throws Throwable;
 
-   // locking commands
-   Object visitLockControlCommand(TxInvocationContext ctx, LockControlCommand command) throws Throwable;
+    Object visitInvalidateL1Command(InvocationContext ctx, InvalidateL1Command invalidateL1Command) throws Throwable;
 
-   Object visitUnknownCommand(InvocationContext ctx, VisitableCommand command) throws Throwable;
-   
-   Object visitDistributedExecuteCommand(InvocationContext ctx, DistributedExecuteCommand<?> command) throws Throwable;
-     
+    // locking commands
+    Object visitLockControlCommand(TxInvocationContext ctx, LockControlCommand command) throws Throwable;
+
+    Object visitUnknownCommand(InvocationContext ctx, VisitableCommand command) throws Throwable;
+
+    Object visitDistributedExecuteCommand(InvocationContext ctx, DistributedExecuteCommand<?> command) throws Throwable;
+
+    //Pedro
+    Object visitTotalOrderPrepareCommand(TxInvocationContext ctx, TotalOrderPrepareCommand command) throws Throwable;
+
+    Object visitVoteCommand(TxInvocationContext ctx, VoteCommand command) throws Throwable;
 }

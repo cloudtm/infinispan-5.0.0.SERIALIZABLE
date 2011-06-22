@@ -43,10 +43,15 @@ import java.util.Map;
 public abstract class AbstractTransport implements Transport {
 
    protected GlobalConfiguration configuration;
+    protected boolean loopback = false;
 
    public void setConfiguration(GlobalConfiguration globalConfiguration) {
       this.configuration = globalConfiguration;
    }
+
+    public void enableLoopback() {
+        loopback = true;
+    }
 
    protected final boolean shouldThrowException(Exception ce) {
       if (!configuration.isStrictPeerToPeer()) {

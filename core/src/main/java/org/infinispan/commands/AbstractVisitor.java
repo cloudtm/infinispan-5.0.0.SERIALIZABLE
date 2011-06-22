@@ -23,23 +23,9 @@
 package org.infinispan.commands;
 
 import org.infinispan.commands.control.LockControlCommand;
-import org.infinispan.commands.read.DistributedExecuteCommand;
-import org.infinispan.commands.read.EntrySetCommand;
-import org.infinispan.commands.read.GetKeyValueCommand;
-import org.infinispan.commands.read.KeySetCommand;
-import org.infinispan.commands.read.SizeCommand;
-import org.infinispan.commands.read.ValuesCommand;
-import org.infinispan.commands.tx.CommitCommand;
-import org.infinispan.commands.tx.PrepareCommand;
-import org.infinispan.commands.tx.RollbackCommand;
-import org.infinispan.commands.write.ClearCommand;
-import org.infinispan.commands.write.EvictCommand;
-import org.infinispan.commands.write.InvalidateCommand;
-import org.infinispan.commands.write.InvalidateL1Command;
-import org.infinispan.commands.write.PutKeyValueCommand;
-import org.infinispan.commands.write.PutMapCommand;
-import org.infinispan.commands.write.RemoveCommand;
-import org.infinispan.commands.write.ReplaceCommand;
+import org.infinispan.commands.read.*;
+import org.infinispan.commands.tx.*;
+import org.infinispan.commands.write.*;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
 
@@ -54,111 +40,121 @@ import java.util.Collection;
  * @since 4.0
  */
 public abstract class AbstractVisitor implements Visitor {
-   // write commands
+    // write commands
 
-   public Object visitPutKeyValueCommand(InvocationContext ctx, PutKeyValueCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitPutKeyValueCommand(InvocationContext ctx, PutKeyValueCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 
-   public Object visitRemoveCommand(InvocationContext ctx, RemoveCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitRemoveCommand(InvocationContext ctx, RemoveCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 
-   public Object visitReplaceCommand(InvocationContext ctx, ReplaceCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitReplaceCommand(InvocationContext ctx, ReplaceCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 
-   public Object visitClearCommand(InvocationContext ctx, ClearCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitClearCommand(InvocationContext ctx, ClearCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 
-   public Object visitPutMapCommand(InvocationContext ctx, PutMapCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitPutMapCommand(InvocationContext ctx, PutMapCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 
-   public Object visitEvictCommand(InvocationContext ctx, EvictCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitEvictCommand(InvocationContext ctx, EvictCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 
-   // read commands
+    // read commands
 
-   public Object visitSizeCommand(InvocationContext ctx, SizeCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitSizeCommand(InvocationContext ctx, SizeCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 
-   public Object visitGetKeyValueCommand(InvocationContext ctx, GetKeyValueCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitGetKeyValueCommand(InvocationContext ctx, GetKeyValueCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 
-   public Object visitKeySetCommand(InvocationContext ctx, KeySetCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitKeySetCommand(InvocationContext ctx, KeySetCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 
-   public Object visitValuesCommand(InvocationContext ctx, ValuesCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitValuesCommand(InvocationContext ctx, ValuesCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 
-   public Object visitEntrySetCommand(InvocationContext ctx, EntrySetCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitEntrySetCommand(InvocationContext ctx, EntrySetCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 
-   // tx commands
+    // tx commands
 
-   public Object visitPrepareCommand(TxInvocationContext ctx, PrepareCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitPrepareCommand(TxInvocationContext ctx, PrepareCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 
-   public Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 
-   public Object visitCommitCommand(TxInvocationContext ctx, CommitCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitCommitCommand(TxInvocationContext ctx, CommitCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 
-   public Object visitInvalidateCommand(InvocationContext ctx, InvalidateCommand invalidateCommand) throws Throwable {
-      return handleDefault(ctx, invalidateCommand);
-   }
-   
-   public Object visitInvalidateL1Command(InvocationContext ctx, InvalidateL1Command invalidateL1Command) throws Throwable {
-	   return visitInvalidateCommand(ctx, invalidateL1Command);
-   }
+    public Object visitInvalidateCommand(InvocationContext ctx, InvalidateCommand invalidateCommand) throws Throwable {
+        return handleDefault(ctx, invalidateCommand);
+    }
 
-   /**
-    * A default handler for all commands visited.  This is called for any visit method called, unless a visit command is
-    * appropriately overridden.
-    *
-    * @param ctx     invocation context
-    * @param command command to handle
-    * @return return value
-    * @throws Throwable in the case of a problem
-    */
-   protected Object handleDefault(InvocationContext ctx, VisitableCommand command) throws Throwable {
-      return null;
-   }
+    public Object visitInvalidateL1Command(InvocationContext ctx, InvalidateL1Command invalidateL1Command) throws Throwable {
+        return visitInvalidateCommand(ctx, invalidateL1Command);
+    }
 
-   /**
-    * Helper method to visit a collection of VisitableCommands.
-    *
-    * @param ctx     Invocation context
-    * @param toVisit collection of commands to visit
-    * @throws Throwable in the event of problems
-    */
-   public void visitCollection(InvocationContext ctx, Collection<? extends VisitableCommand> toVisit) throws Throwable {
-      for (VisitableCommand command : toVisit) {
-         command.acceptVisitor(ctx, this);
-      }
-   }
+    /**
+     * A default handler for all commands visited.  This is called for any visit method called, unless a visit command is
+     * appropriately overridden.
+     *
+     * @param ctx     invocation context
+     * @param command command to handle
+     * @return return value
+     * @throws Throwable in the case of a problem
+     */
+    protected Object handleDefault(InvocationContext ctx, VisitableCommand command) throws Throwable {
+        return null;
+    }
 
-   public Object visitLockControlCommand(TxInvocationContext ctx, LockControlCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    /**
+     * Helper method to visit a collection of VisitableCommands.
+     *
+     * @param ctx     Invocation context
+     * @param toVisit collection of commands to visit
+     * @throws Throwable in the event of problems
+     */
+    public void visitCollection(InvocationContext ctx, Collection<? extends VisitableCommand> toVisit) throws Throwable {
+        for (VisitableCommand command : toVisit) {
+            command.acceptVisitor(ctx, this);
+        }
+    }
 
-   public Object visitUnknownCommand(InvocationContext ctx, VisitableCommand command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
-   
-   public Object visitDistributedExecuteCommand(InvocationContext ctx, DistributedExecuteCommand<?> command) throws Throwable {
-      return handleDefault(ctx, command);
-   }
+    public Object visitLockControlCommand(TxInvocationContext ctx, LockControlCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
+
+    public Object visitUnknownCommand(InvocationContext ctx, VisitableCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
+
+    public Object visitDistributedExecuteCommand(InvocationContext ctx, DistributedExecuteCommand<?> command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
+
+    //PEDRO
+    public Object visitTotalOrderPrepareCommand(TxInvocationContext ctx, TotalOrderPrepareCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
+
+    @Override
+    public Object visitVoteCommand(TxInvocationContext ctx, VoteCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 }

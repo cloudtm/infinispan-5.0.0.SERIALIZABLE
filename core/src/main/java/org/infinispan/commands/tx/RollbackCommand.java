@@ -24,6 +24,7 @@ package org.infinispan.commands.tx;
 
 import org.infinispan.commands.Visitor;
 import org.infinispan.context.InvocationContext;
+import org.infinispan.context.impl.RemoteTxInvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.transaction.xa.GlobalTransaction;
 import org.infinispan.transaction.RemoteTransaction;
@@ -35,30 +36,56 @@ import org.infinispan.transaction.RemoteTransaction;
  * @since 4.0
  */
 public class RollbackCommand extends AbstractTransactionBoundaryCommand {
-   public static final byte COMMAND_ID = 13;
+    public static final byte COMMAND_ID = 13;
 
-   public RollbackCommand(GlobalTransaction globalTransaction) {
-      this.globalTx = globalTransaction;
-   }
+    private boolean neededToBeSend = true;
 
-   public RollbackCommand() {
-   }
+    public RollbackCommand(GlobalTransaction globalTransaction) {
+        this.globalTx = globalTransaction;
+    }
 
-   public Object acceptVisitor(InvocationContext ctx, Visitor visitor) throws Throwable {
-      return visitor.visitRollbackCommand((TxInvocationContext) ctx, this);
-   }
+    public RollbackCommand() {
+    }
 
-   @Override
-   public void visitRemoteTransaction(RemoteTransaction tx) {
-      tx.invalidate();
-   }
+    public Object acceptVisitor(InvocationContext ctx, Visitor visitor) throws Throwable {
+        return visitor.visitRollbackCommand((TxInvocationContext) ctx, this);
+    }
 
-   public byte getCommandId() {
-      return COMMAND_ID;
-   }
+    @Override
+    public void visitRemoteTransaction(RemoteTransaction tx) {
+        tx.invalidate();
+    }
 
-   @Override
-   public String toString() {
-      return "RollbackCommand {" + super.toString();
-   }
+    public byte getCommandId() {
+        return COMMAND_ID;
+    }
+
+    @Override
+    public String toString() {
+        return "RollbackCommand {" + super.toString();
+    }
+
+    public boolean isNeededToBeSend() {
+        return neededToBeSend;
+    }
+
+    public void setNeededToBeSend(boolean neededToBeSend) {
+        this.neededToBeSend = neededToBeSend;
+    }
+
+    @Override
+    public Object perform(InvocationContext ctx) throws Throwable {
+        if(configuration.isTotalOrderReplication()) {
+            return totalOrderPerform(ctx);
+        } else {
+            return super.perform(ctx);
+        }
+    }
+
+    private Object totalOrderPerform(InvocationContext ctx) {
+        if (ctx != null) throw new IllegalStateException("Expected null context!");
+        globalTx.setRemote(true);
+        RemoteTxInvocationContext ctxt = icc.createRemoteTxInvocationContext(getOrigin());
+        return invoker.invoke(ctxt, this);
+    }
 }

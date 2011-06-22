@@ -28,7 +28,7 @@ import org.infinispan.context.Flag;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.notifications.cachelistener.CacheNotifier;
 
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
@@ -38,140 +38,152 @@ import java.util.Set;
  * @since 4.0
  */
 public class PutMapCommand implements WriteCommand {
-   public static final byte COMMAND_ID = 9;
+    public static final byte COMMAND_ID = 9;
 
-   Map<Object, Object> map;
-   CacheNotifier notifier;
-   long lifespanMillis = -1;
-   long maxIdleTimeMillis = -1;
-   Set<Flag> flags;
+    Map<Object, Object> map;
+    Map<Object, Object> writeSkewValue;
+    CacheNotifier notifier;
+    long lifespanMillis = -1;
+    long maxIdleTimeMillis = -1;
+    Set<Flag> flags;
 
-   public PutMapCommand() {
-   }
+    public PutMapCommand() {
+        writeSkewValue = new HashMap<Object, Object>();
+    }
 
-   public PutMapCommand(Map map, CacheNotifier notifier, long lifespanMillis, long maxIdleTimeMillis, Set<Flag> flags) {
-      this.map = map;
-      this.notifier = notifier;
-      this.lifespanMillis = lifespanMillis;
-      this.maxIdleTimeMillis = maxIdleTimeMillis;
-      this.flags = flags;
-   }
+    public PutMapCommand(Map map, CacheNotifier notifier, long lifespanMillis, long maxIdleTimeMillis, Set<Flag> flags) {
+        super();
+        this.map = map;
+        this.notifier = notifier;
+        this.lifespanMillis = lifespanMillis;
+        this.maxIdleTimeMillis = maxIdleTimeMillis;
+        this.flags = flags;
+    }
 
-   public void init(CacheNotifier notifier) {
-      this.notifier = notifier;
-   }
+    public void init(CacheNotifier notifier) {
+        this.notifier = notifier;
+    }
 
-   public Object acceptVisitor(InvocationContext ctx, Visitor visitor) throws Throwable {
-      return visitor.visitPutMapCommand(ctx, this);
-   }
+    public Object acceptVisitor(InvocationContext ctx, Visitor visitor) throws Throwable {
+        return visitor.visitPutMapCommand(ctx, this);
+    }
 
-   private MVCCEntry lookupMvccEntry(InvocationContext ctx, Object key) {
-      return (MVCCEntry) ctx.lookupEntry(key);
-   }
+    private MVCCEntry lookupMvccEntry(InvocationContext ctx, Object key) {
+        return (MVCCEntry) ctx.lookupEntry(key);
+    }
 
-   public Object perform(InvocationContext ctx) throws Throwable {
-      for (Entry<Object, Object> e : map.entrySet()) {
-         Object key = e.getKey();
-         MVCCEntry me = lookupMvccEntry(ctx, key);
-         notifier.notifyCacheEntryModified(key, me.getValue(), true, ctx);
-         me.setValue(e.getValue());
-         me.setLifespan(lifespanMillis);
-         me.setMaxIdle(maxIdleTimeMillis);
-         notifier.notifyCacheEntryModified(key, me.getValue(), false, ctx);
-      }
-      return null;
-   }
+    public Object perform(InvocationContext ctx) throws Throwable {
+        for (Entry<Object, Object> e : map.entrySet()) {
+            Object key = e.getKey();
+            MVCCEntry me = lookupMvccEntry(ctx, key);
+            notifier.notifyCacheEntryModified(key, me.getValue(), true, ctx);
+            if(me.isRemoteWriteSkewNeeded() && !writeSkewValue.containsKey(key)) {
+                writeSkewValue.put(key, me.getValue());
+            }
+            me.setValue(e.getValue());
+            me.setLifespan(lifespanMillis);
+            me.setMaxIdle(maxIdleTimeMillis);
+            notifier.notifyCacheEntryModified(key, me.getValue(), false, ctx);
+        }
+        return null;
+    }
 
-   public Map<Object, Object> getMap() {
-      return map;
-   }
+    public Map<Object, Object> getMap() {
+        return map;
+    }
 
-   public void setMap(Map<Object, Object> map) {
-      this.map = map;
-   }
+    public void setMap(Map<Object, Object> map) {
+        this.map = map;
+    }
 
-   public byte getCommandId() {
-      return COMMAND_ID;
-   }
+    public byte getCommandId() {
+        return COMMAND_ID;
+    }
 
-   public Object[] getParameters() {
-      return new Object[]{map, lifespanMillis, maxIdleTimeMillis, flags};
-   }
+    public Object[] getParameters() {
+        return new Object[]{map, writeSkewValue, lifespanMillis, maxIdleTimeMillis, flags};
+    }
 
-   public void setParameters(int commandId, Object[] parameters) {
-      map = (Map) parameters[0];
-      lifespanMillis = (Long) parameters[1];
-      maxIdleTimeMillis = (Long) parameters[2];
-      if (parameters.length>3) {
-         this.flags = (Set<Flag>) parameters[3];
-      }
-   }
+    public void setParameters(int commandId, Object[] parameters) {
+        map = (Map) parameters[0];
+        writeSkewValue = (Map) parameters[1];
+        lifespanMillis = (Long) parameters[2];
+        maxIdleTimeMillis = (Long) parameters[3];
+        if (parameters.length>4) {
+            this.flags = (Set<Flag>) parameters[4];
+        }
+    }
 
-   @Override
-   public boolean equals(Object o) {
-      if (this == o) return true;
-      if (o == null || getClass() != o.getClass()) return false;
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
 
-      PutMapCommand that = (PutMapCommand) o;
+        PutMapCommand that = (PutMapCommand) o;
 
-      if (lifespanMillis != that.lifespanMillis) return false;
-      if (maxIdleTimeMillis != that.maxIdleTimeMillis) return false;
-      if (map != null ? !map.equals(that.map) : that.map != null) return false;
+        if (lifespanMillis != that.lifespanMillis) return false;
+        if (maxIdleTimeMillis != that.maxIdleTimeMillis) return false;
+        if (map != null ? !map.equals(that.map) : that.map != null) return false;
 
-      return true;
-   }
+        return true;
+    }
 
-   @Override
-   public int hashCode() {
-      int result = map != null ? map.hashCode() : 0;
-      result = 31 * result + (int) (lifespanMillis ^ (lifespanMillis >>> 32));
-      result = 31 * result + (int) (maxIdleTimeMillis ^ (maxIdleTimeMillis >>> 32));
-      return result;
-   }
+    @Override
+    public int hashCode() {
+        int result = map != null ? map.hashCode() : 0;
+        result = 31 * result + (int) (lifespanMillis ^ (lifespanMillis >>> 32));
+        result = 31 * result + (int) (maxIdleTimeMillis ^ (maxIdleTimeMillis >>> 32));
+        return result;
+    }
 
-   @Override
-   public String toString() {
-      return new StringBuilder()
-         .append("PutMapCommand{map=")
-         .append(map)
-         .append(", flags=").append(flags)
-         .append(", lifespanMillis=").append(lifespanMillis)
-         .append(", maxIdleTimeMillis=").append(maxIdleTimeMillis)
-         .append("}")
-         .toString();
-   }
+    @Override
+    public String toString() {
+        return new StringBuilder()
+                .append("PutMapCommand{map=")
+                .append(map)
+                .append(", flags=").append(flags)
+                .append(", lifespanMillis=").append(lifespanMillis)
+                .append(", maxIdleTimeMillis=").append(maxIdleTimeMillis)
+                .append("}")
+                .toString();
+    }
 
-   public boolean shouldInvoke(InvocationContext ctx) {
-      return true;
-   }   
+    public boolean shouldInvoke(InvocationContext ctx) {
+        return true;
+    }
 
-   public boolean isSuccessful() {
-      return true;
-   }
+    public boolean isSuccessful() {
+        return true;
+    }
 
-   public boolean isConditional() {
-      return false;
-   }
+    public boolean isConditional() {
+        return false;
+    }
 
-   public Set<Object> getAffectedKeys() {
-      return map.keySet();
-   }
+    public Set<Object> getAffectedKeys() {
+        return map.keySet();
+    }
 
-   public long getLifespanMillis() {
-      return lifespanMillis;
-   }
+    public long getLifespanMillis() {
+        return lifespanMillis;
+    }
 
-   public long getMaxIdleTimeMillis() {
-      return maxIdleTimeMillis;
-   }
+    public long getMaxIdleTimeMillis() {
+        return maxIdleTimeMillis;
+    }
 
-   @Override
-   public Set<Flag> getFlags() {
-      return flags;
-   }
+    @Override
+    public Set<Flag> getFlags() {
+        return flags;
+    }
 
-   @Override
-   public void setFlags(Set<Flag> flags) {
-      this.flags = flags;
-   }
+    @Override
+    public void setFlags(Set<Flag> flags) {
+        this.flags = flags;
+    }
+
+    @Override
+    public Map<Object, Object> getKeyAndValuesForWriteSkewCheck() {
+        return writeSkewValue;
+    }
 }

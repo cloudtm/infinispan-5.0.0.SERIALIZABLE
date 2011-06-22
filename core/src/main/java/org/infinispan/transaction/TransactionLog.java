@@ -23,6 +23,7 @@
 package org.infinispan.transaction;
 
 import org.infinispan.commands.tx.PrepareCommand;
+import org.infinispan.commands.tx.TotalOrderPrepareCommand;
 import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.io.UnsignedNumeric;
 import org.infinispan.marshall.AbstractExternalizer;
@@ -36,10 +37,7 @@ import org.infinispan.util.logging.LogFactory;
 import java.io.IOException;
 import java.io.ObjectInput;
 import java.io.ObjectOutput;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -51,138 +49,168 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * @author Jason T. Greene
  */
 public class TransactionLog {
-   private final Map<GlobalTransaction, PrepareCommand> pendingPrepares = new ConcurrentHashMap<GlobalTransaction, PrepareCommand>();
-   private final BlockingQueue<LogEntry> entries = new LinkedBlockingQueue<LogEntry>();
-   private AtomicBoolean active = new AtomicBoolean();
+    private final Map<GlobalTransaction, PrepareCommand> pendingPrepares = new ConcurrentHashMap<GlobalTransaction, PrepareCommand>();
+    private final BlockingQueue<LogEntry> entries = new LinkedBlockingQueue<LogEntry>();
+    private final List<TotalOrderPrepareCommand> receivedInTotalOrder = new LinkedList<TotalOrderPrepareCommand>();
+    private AtomicBoolean active = new AtomicBoolean();
 
-   public static class LogEntry {
-      private final GlobalTransaction transaction;
-      private final WriteCommand[] modifications;
+    public static class LogEntry {
+        private final GlobalTransaction transaction;
+        private final WriteCommand[] modifications;
 
-      public LogEntry(GlobalTransaction transaction, WriteCommand... modifications) {
-         this.transaction = transaction;
-         this.modifications = modifications;
-      }
+        public LogEntry(GlobalTransaction transaction, WriteCommand... modifications) {
+            this.transaction = transaction;
+            this.modifications = modifications;
+        }
 
-      public GlobalTransaction getTransaction() {
-         return transaction;
-      }
+        public GlobalTransaction getTransaction() {
+            return transaction;
+        }
 
-      public WriteCommand[] getModifications() {
-         return modifications;
-      }
+        public WriteCommand[] getModifications() {
+            return modifications;
+        }
 
-      public static class Externalizer extends AbstractExternalizer<LogEntry> {
-         @Override
-         public void writeObject(ObjectOutput output, TransactionLog.LogEntry le) throws IOException {
-            output.writeObject(le.transaction);
-            WriteCommand[] cmds = le.modifications;
-            UnsignedNumeric.writeUnsignedInt(output, cmds.length);
-            for (WriteCommand c : cmds) output.writeObject(c);
-         }
+        public static class Externalizer extends AbstractExternalizer<LogEntry> {
+            @Override
+            public void writeObject(ObjectOutput output, TransactionLog.LogEntry le) throws IOException {
+                output.writeObject(le.transaction);
+                WriteCommand[] cmds = le.modifications;
+                UnsignedNumeric.writeUnsignedInt(output, cmds.length);
+                for (WriteCommand c : cmds) output.writeObject(c);
+            }
 
-         @Override
-         public TransactionLog.LogEntry readObject(ObjectInput input) throws IOException, ClassNotFoundException {
-            GlobalTransaction gtx = (GlobalTransaction) input.readObject();
-            int numCommands = UnsignedNumeric.readUnsignedInt(input);
-            WriteCommand[] cmds = new WriteCommand[numCommands];
-            for (int i = 0; i < numCommands; i++) cmds[i] = (WriteCommand) input.readObject();
-            return new TransactionLog.LogEntry(gtx, cmds);
-         }
+            @Override
+            public TransactionLog.LogEntry readObject(ObjectInput input) throws IOException, ClassNotFoundException {
+                GlobalTransaction gtx = (GlobalTransaction) input.readObject();
+                int numCommands = UnsignedNumeric.readUnsignedInt(input);
+                WriteCommand[] cmds = new WriteCommand[numCommands];
+                for (int i = 0; i < numCommands; i++) cmds[i] = (WriteCommand) input.readObject();
+                return new TransactionLog.LogEntry(gtx, cmds);
+            }
 
-         @Override
-         public Integer getId() {
-            return Ids.TRANSACTION_LOG_ENTRY;
-         }
+            @Override
+            public Integer getId() {
+                return Ids.TRANSACTION_LOG_ENTRY;
+            }
 
-         @Override
-         public Set<Class<? extends LogEntry>> getTypeClasses() {
-            return Util.<Class<? extends LogEntry>>asSet(LogEntry.class);
-         }
-      }
-   }
+            @Override
+            public Set<Class<? extends LogEntry>> getTypeClasses() {
+                return Util.<Class<? extends LogEntry>>asSet(LogEntry.class);
+            }
+        }
 
-   private static final Log log = LogFactory.getLog(TransactionLog.class);
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
 
-   public void logPrepare(PrepareCommand command) {
-      pendingPrepares.put(command.getGlobalTransaction(), command);
-   }
+            LogEntry logEntry = (LogEntry) o;
 
-   public void logCommit(GlobalTransaction gtx) {
-      PrepareCommand command = pendingPrepares.remove(gtx);
-      // it is perfectly normal for a prepare not to be logged for this gtx, for example if a transaction did not
-      // modify anything, then beforeCompletion() is not invoked and logPrepare() will not be called to register the
-      // prepare.
-      if (command != null && isActive()) addEntry(gtx, command.getModifications());
-   }
+            return transaction != null ? !transaction.equals(logEntry.transaction) : logEntry.transaction != null;
+        }
 
-   private void addEntry(GlobalTransaction gtx, WriteCommand... commands) {
-      LogEntry entry = new LogEntry(gtx, commands);
-      boolean success = false;
-      while (!success) {
-         try {
-            if (log.isTraceEnabled()) log.tracef("Added commit entry to tx log %s", entry);
+        @Override
+        public int hashCode() {
+            return transaction != null ? transaction.hashCode() : 0;
+        }
+    }
 
-            entries.put(entry);
-            success = true;
-         }
-         catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-         }
-      }
-   }
+    private static final Log log = LogFactory.getLog(TransactionLog.class);
 
-   public final void logOnePhaseCommit(GlobalTransaction gtx, WriteCommand[] modifications) {
-      // Just in case...
-      if (gtx != null) pendingPrepares.remove(gtx);
-      if (isActive() && modifications != null && modifications.length > 0)
-         addEntry(gtx, modifications);
-   }
+    public void logPrepare(PrepareCommand command) {
+        synchronized (receivedInTotalOrder) {
+            receivedInTotalOrder.remove(command.getGlobalTransaction());
+            pendingPrepares.put(command.getGlobalTransaction(), command);
+        }
+    }
 
-   public final void logNoTxWrite(WriteCommand write) {
-      if (isActive()) addEntry(null, write);
-   }
+    public void logCommit(GlobalTransaction gtx) {
+        PrepareCommand command = pendingPrepares.remove(gtx);
+        // it is perfectly normal for a prepare not to be logged for this gtx, for example if a transaction did not
+        // modify anything, then beforeCompletion() is not invoked and logPrepare() will not be called to register the
+        // prepare.
+        if (command != null && isActive()) addEntry(gtx, command.getModifications());
+    }
 
-   public void rollback(GlobalTransaction gtx) {
-      pendingPrepares.remove(gtx);
-   }
+    private void addEntry(GlobalTransaction gtx, WriteCommand... commands) {
+        LogEntry entry = new LogEntry(gtx, commands);
+        boolean success = false;
+        while (!success) {
+            try {
+                if (log.isTraceEnabled()) log.tracef("Added commit entry to tx log %s", entry);
 
-   public final boolean isActive() {
-      return active.get();
-   }
+                entries.put(entry);
+                success = true;
+            }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
 
-   public final boolean activate() {
-      return active.compareAndSet(false, true);
-   }
+    public final void logOnePhaseCommit(GlobalTransaction gtx, WriteCommand[] modifications) {
+        // Just in case...
+        synchronized (receivedInTotalOrder) {
+            if (gtx != null) {
+                pendingPrepares.remove(gtx);
+                receivedInTotalOrder.remove(gtx);
+            }
+            if (isActive() && modifications != null && modifications.length > 0)
+                addEntry(gtx, modifications);
+        }
+    }
 
-   public final void deactivate() {
-      active.set(false);
-      if (!entries.isEmpty())
-         log.unprocessedTxLogEntries(entries.size());
-      entries.clear();
-   }
+    public final void logNoTxWrite(WriteCommand write) {
+        if (isActive()) addEntry(null, write);
+    }
 
-   public final int size() {
-      return entries.size();
-   }
+    public void rollback(GlobalTransaction gtx) {
+        pendingPrepares.remove(gtx);
+    }
 
-   public void writeCommitLog(StreamingMarshaller marshaller, ObjectOutput out) throws Exception {
-      List<LogEntry> buffer = new ArrayList<LogEntry>(10);
+    public final boolean isActive() {
+        return active.get();
+    }
 
-      while (entries.drainTo(buffer, 10) > 0) {
-         for (LogEntry entry : buffer)
-            marshaller.objectToObjectStream(entry, out);
+    public final boolean activate() {
+        return active.compareAndSet(false, true);
+    }
 
-         buffer.clear();
-      }
-   }
+    public final void deactivate() {
+        active.set(false);
+        if (!entries.isEmpty())
+            log.unprocessedTxLogEntries(entries.size());
+        entries.clear();
+    }
 
-   public void writePendingPrepares(StreamingMarshaller marshaller, ObjectOutput out) throws Exception {
-      if (log.isTraceEnabled()) log.tracef("Writing %s pending prepares to the stream", pendingPrepares.size());
-      for (PrepareCommand entry : pendingPrepares.values()) marshaller.objectToObjectStream(entry, out);
-   }
+    public final int size() {
+        return entries.size();
+    }
 
-   public boolean hasPendingPrepare(PrepareCommand command) {
-      return pendingPrepares.containsKey(command.getGlobalTransaction());
-   }
+    public void writeCommitLog(StreamingMarshaller marshaller, ObjectOutput out) throws Exception {
+        List<LogEntry> buffer = new ArrayList<LogEntry>(10);
+
+        while (entries.drainTo(buffer, 10) > 0) {
+            for (LogEntry entry : buffer)
+                marshaller.objectToObjectStream(entry, out);
+
+            buffer.clear();
+        }
+    }
+
+    public void writePendingPrepares(StreamingMarshaller marshaller, ObjectOutput out) throws Exception {
+        if (log.isTraceEnabled()) log.tracef("Writing %s pending prepares to the stream", pendingPrepares.size());
+        for (PrepareCommand entry : pendingPrepares.values()) marshaller.objectToObjectStream(entry, out);
+    }
+
+    public boolean hasPendingPrepare(PrepareCommand command) {
+        return pendingPrepares.containsKey(command.getGlobalTransaction());
+    }
+
+    public void addGlobalTransactionInTotalOrder(TotalOrderPrepareCommand command) {
+        synchronized (receivedInTotalOrder) {
+            receivedInTotalOrder.add(command);
+        }
+    }
 }

@@ -26,6 +26,7 @@ import org.infinispan.CacheException;
 import org.infinispan.commands.CommandsFactory;
 import org.infinispan.commands.ReplicableCommand;
 import org.infinispan.commands.remote.CacheRpcCommand;
+import org.infinispan.commands.tx.TotalOrderPrepareCommand;
 import org.infinispan.config.Configuration;
 import org.infinispan.factories.KnownComponentNames;
 import org.infinispan.factories.annotations.ComponentName;
@@ -75,329 +76,334 @@ import java.util.concurrent.atomic.AtomicLong;
 @MBean(objectName = "RpcManager", description = "Manages all remote calls to remote cache instances in the cluster.")
 public class RpcManagerImpl implements RpcManager {
 
-   private static final Log log = LogFactory.getLog(RpcManagerImpl.class);
-   private static final boolean trace = log.isTraceEnabled();
+    private static final Log log = LogFactory.getLog(RpcManagerImpl.class);
+    private static final boolean trace = log.isTraceEnabled();
 
-   private Transport t;
-   private final AtomicLong replicationCount = new AtomicLong(0);
-   private final AtomicLong replicationFailures = new AtomicLong(0);
-   private final AtomicLong totalReplicationTime = new AtomicLong(0);
+    private Transport t;
+    private final AtomicLong replicationCount = new AtomicLong(0);
+    private final AtomicLong replicationFailures = new AtomicLong(0);
+    private final AtomicLong totalReplicationTime = new AtomicLong(0);
 
-   @ManagedAttribute(description = "Enables or disables the gathering of statistics by this component", writable = true)
-   boolean statisticsEnabled = false; // by default, don't gather statistics.
-   private volatile Address currentStateTransferSource;
-   private boolean stateTransferEnabled;
-   private Configuration configuration;
-   private ReplicationQueue replicationQueue;
-   private ExecutorService asyncExecutor;
-   private CommandsFactory cf;
+    @ManagedAttribute(description = "Enables or disables the gathering of statistics by this component", writable = true)
+    boolean statisticsEnabled = false; // by default, don't gather statistics.
+    private volatile Address currentStateTransferSource;
+    private boolean stateTransferEnabled;
+    private Configuration configuration;
+    private ReplicationQueue replicationQueue;
+    private ExecutorService asyncExecutor;
+    private CommandsFactory cf;
+    private boolean totalOrderScheme;
 
 
-   @Inject
-   public void injectDependencies(Transport t, Configuration configuration, ReplicationQueue replicationQueue, CommandsFactory cf,
-                                  @ComponentName(KnownComponentNames.ASYNC_TRANSPORT_EXECUTOR) ExecutorService e) {
-      this.t = t;
-      this.configuration = configuration;
-      this.replicationQueue = replicationQueue;
-      this.asyncExecutor = e;
-      this.cf = cf;
-   }
+    @Inject
+    public void injectDependencies(Transport t, Configuration configuration, ReplicationQueue replicationQueue, CommandsFactory cf,
+                                   @ComponentName(KnownComponentNames.ASYNC_TRANSPORT_EXECUTOR) ExecutorService e) {
+        this.t = t;
+        this.configuration = configuration;
+        this.replicationQueue = replicationQueue;
+        this.asyncExecutor = e;
+        this.cf = cf;
+        this.totalOrderScheme = configuration.isTotalOrderReplication();
+        if(totalOrderScheme) {
+            t.enableLoopback();
+        }
+    }
 
-   @Start(priority = 9)
-   private void start() {
-      stateTransferEnabled = configuration.isStateTransferEnabled();
-      statisticsEnabled = configuration.isExposeJmxStatistics();
-   }
+    @Start(priority = 9)
+    private void start() {
+        stateTransferEnabled = configuration.isStateTransferEnabled();
+        statisticsEnabled = configuration.isExposeJmxStatistics();
+    }
 
-   @Stop(priority = 9)
-   private void stop() {
-      asyncExecutor.shutdown();
-   }
+    @Stop(priority = 9)
+    private void stop() {
+        asyncExecutor.shutdown();
+    }
 
-   private boolean useReplicationQueue(boolean sync) {
-      return !sync && replicationQueue != null && replicationQueue.isEnabled();
-   }
+    private boolean useReplicationQueue(boolean sync) {
+        return !sync && replicationQueue != null && replicationQueue.isEnabled();
+    }
 
-   public final Map<Address, Response> invokeRemotely(Collection<Address> recipients, ReplicableCommand rpcCommand, ResponseMode mode, long timeout, boolean usePriorityQueue, ResponseFilter responseFilter) {
-      List<Address> members = t.getMembers();
-      if (members.size() < 2) {
-         if (log.isDebugEnabled())
-            log.debug("We're the only member in the cluster; Don't invoke remotely.");
-         return Collections.emptyMap();
-      } else {
-         long startTime = 0;
-         if (statisticsEnabled) startTime = System.currentTimeMillis();
-         try {
-            Map<Address, Response> result = t.invokeRemotely(recipients, rpcCommand, mode, timeout, usePriorityQueue, responseFilter, stateTransferEnabled);
-            if (isStatisticsEnabled()) replicationCount.incrementAndGet();
-            return result;
-         } catch (CacheException e) {
-            if (log.isTraceEnabled()) {
-               log.trace("replication exception: ", e);
-            }
-
-            if (isStatisticsEnabled()) replicationFailures.incrementAndGet();
-            throw e;
-         } catch (Throwable th) {
-            log.unexpectedErrorReplicating(th);
-            if (isStatisticsEnabled()) replicationFailures.incrementAndGet();
-            throw new CacheException(th);
-         } finally {
-            if (statisticsEnabled) {
-               long timeTaken = System.currentTimeMillis() - startTime;
-               totalReplicationTime.getAndAdd(timeTaken);
-            }
-         }
-      }
-   }
-
-   public final Map<Address, Response> invokeRemotely(Collection<Address> recipients, ReplicableCommand rpcCommand, ResponseMode mode, long timeout, boolean usePriorityQueue) {
-      return invokeRemotely(recipients, rpcCommand, mode, timeout, usePriorityQueue, null);
-   }
-
-   public final Map<Address, Response> invokeRemotely(Collection<Address> recipients, ReplicableCommand rpcCommand, ResponseMode mode, long timeout) throws Exception {
-      return invokeRemotely(recipients, rpcCommand, mode, timeout, false, null);
-   }
-
-   public void retrieveState(String cacheName, long timeout) throws StateTransferException {
-      if (t.isSupportStateTransfer()) {
-         long initialWaitTime = configuration.getStateRetrievalInitialRetryWaitTime();
-         int waitTimeIncreaseFactor = configuration.getStateRetrievalRetryWaitTimeIncreaseFactor();
-         int numRetries = configuration.getStateRetrievalNumRetries();
-         List<Address> members = t.getMembers();
-         if (members.size() < 2) {
+    public final Map<Address, Response> invokeRemotely(Collection<Address> recipients, ReplicableCommand rpcCommand, ResponseMode mode, long timeout, boolean usePriorityQueue, ResponseFilter responseFilter) {
+        List<Address> members = t.getMembers();
+        if (!(rpcCommand instanceof TotalOrderPrepareCommand) && members.size() < 2) { //pedro: added first condition
             if (log.isDebugEnabled())
-               log.debug("We're the only member in the cluster; no one to retrieve state from. Not doing anything!");
-            return;
-         }
-
-         boolean success = false;
-
-         try {
-            long wait = initialWaitTime;
-            outer:
-            for (int i = 0; i < numRetries; i++) {
-               for (Address member : members) {
-                  if (!member.equals(t.getAddress())) {
-                     try {
-                        if (log.isInfoEnabled()) log.tryingToFetchState(member);
-                        currentStateTransferSource = member;
-                        if (t.retrieveState(cacheName, member, timeout)) {
-                           if (log.isInfoEnabled())
-                              log.successfullyAppliedState(member);
-                           success = true;
-                           break outer;
-                        }
-                     } catch (StateTransferException e) {
-                        if (log.isDebugEnabled()) log.debug("Error while fetching state from member " + member, e);
-                     } finally {
-                        currentStateTransferSource = null;
-                     }
-                  }
-               }
-
-               if (!success) {
-                  log.couldNotFindPeerForState();
-
-                  try {
-                     Thread.sleep(wait *= waitTimeIncreaseFactor);
-                  }
-                  catch (InterruptedException e) {
-                     Thread.currentThread().interrupt();
-                  }
-               }
-
-            }
-         } finally {
-            currentStateTransferSource = null;
-         }
-
-         if (!success) throw new StateTransferException("Unable to fetch state on startup");
-      } else {
-         throw new StateTransferException("Transport does not, or is not configured to, support state transfer.  Please disable fetching state on startup, or reconfigure your transport.");
-      }
-   }
-
-   public final void broadcastRpcCommand(ReplicableCommand rpc, boolean sync) throws RpcException {
-      broadcastRpcCommand(rpc, sync, false);
-   }
-
-   public final void broadcastRpcCommand(ReplicableCommand rpc, boolean sync, boolean usePriorityQueue) throws RpcException {
-      if (useReplicationQueue(sync)) {
-         replicationQueue.add(rpc);
-      } else {
-         invokeRemotely(null, rpc, sync, usePriorityQueue);
-      }
-   }
-
-   public final void broadcastRpcCommandInFuture(ReplicableCommand rpc, NotifyingNotifiableFuture<Object> l) {
-      broadcastRpcCommandInFuture(rpc, false, l);
-   }
-
-   public final void broadcastRpcCommandInFuture(ReplicableCommand rpc, boolean usePriorityQueue, NotifyingNotifiableFuture<Object> l) {
-      invokeRemotelyInFuture(null, rpc, usePriorityQueue, l);
-   }
-
-   public final void invokeRemotely(Collection<Address> recipients, ReplicableCommand rpc, boolean sync) throws RpcException {
-      invokeRemotely(recipients, rpc, sync, false);
-   }
-
-   public final Map<Address, Response> invokeRemotely(Collection<Address> recipients, ReplicableCommand rpc, boolean sync, boolean usePriorityQueue) throws RpcException {
-      return invokeRemotely(recipients, rpc, sync, usePriorityQueue, configuration.getSyncReplTimeout());
-   }
-
-   public final Map<Address, Response> invokeRemotely(Collection<Address> recipients, ReplicableCommand rpc, boolean sync, boolean usePriorityQueue, long timeout) throws RpcException {
-      if (trace) log.tracef("%s broadcasting call %s to recipient list %s", t.getAddress(), rpc, recipients);
-
-      if (useReplicationQueue(sync)) {
-         replicationQueue.add(rpc);
-         return null;
-      } else {
-         if (!(rpc instanceof CacheRpcCommand)) {
-            rpc = cf.buildSingleRpcCommand(rpc);
-         }
-         Map<Address, Response> rsps = invokeRemotely(recipients, rpc, getResponseMode(sync), timeout, usePriorityQueue);
-         if (trace) log.tracef("Response(s) to %s is %s", rpc, rsps);
-         if (sync) checkResponses(rsps);
-         return rsps;
-      }
-   }
-
-   public final void invokeRemotelyInFuture(Collection<Address> recipients, ReplicableCommand rpc, NotifyingNotifiableFuture<Object> l) {
-      invokeRemotelyInFuture(recipients, rpc, false, l);
-   }
-
-   public final void invokeRemotelyInFuture(final Collection<Address> recipients, final ReplicableCommand rpc, final boolean usePriorityQueue, final NotifyingNotifiableFuture<Object> l) {
-      invokeRemotelyInFuture(recipients, rpc, usePriorityQueue, l, configuration.getSyncReplTimeout());
-   }
-
-   public final void invokeRemotelyInFuture(final Collection<Address> recipients, final ReplicableCommand rpc, final boolean usePriorityQueue, final NotifyingNotifiableFuture<Object> l, final long timeout) {
-      if (trace) log.tracef("%s invoking in future call %s to recipient list %s", t.getAddress(), rpc, recipients);
-      final CountDownLatch futureSet = new CountDownLatch(1);
-      Callable<Object> c = new Callable<Object>() {
-         public Object call() throws Exception {
-            Object result = null;
+                log.debug("We're the only member in the cluster; Don't invoke remotely.");
+            return Collections.emptyMap();
+        } else {
+            long startTime = 0;
+            if (statisticsEnabled) startTime = System.currentTimeMillis();
             try {
-               result = invokeRemotely(recipients, rpc, true, usePriorityQueue, timeout);           
+                Map<Address, Response> result = t.invokeRemotely(recipients, rpcCommand, mode, timeout, usePriorityQueue, responseFilter, stateTransferEnabled);
+                if (isStatisticsEnabled()) replicationCount.incrementAndGet();
+                return result;
+            } catch (CacheException e) {
+                if (log.isTraceEnabled()) {
+                    log.trace("replication exception: ", e);
+                }
+
+                if (isStatisticsEnabled()) replicationFailures.incrementAndGet();
+                throw e;
+            } catch (Throwable th) {
+                log.unexpectedErrorReplicating(th);
+                if (isStatisticsEnabled()) replicationFailures.incrementAndGet();
+                throw new CacheException(th);
             } finally {
-               try {
-                  futureSet.await();
-               } catch (InterruptedException e) {
-                  Thread.currentThread().interrupt();
-               } finally {
-                  l.notifyDone();
-               }
+                if (statisticsEnabled) {
+                    long timeTaken = System.currentTimeMillis() - startTime;
+                    totalReplicationTime.getAndAdd(timeTaken);
+                }
             }
-            return result;
-         }
-      };
-      l.setNetworkFuture(asyncExecutor.submit(c));
-      futureSet.countDown();      
-   }
+        }
+    }
 
-   public Transport getTransport() {
-      return t;
-   }
+    public final Map<Address, Response> invokeRemotely(Collection<Address> recipients, ReplicableCommand rpcCommand, ResponseMode mode, long timeout, boolean usePriorityQueue) {
+        return invokeRemotely(recipients, rpcCommand, mode, timeout, usePriorityQueue, null);
+    }
 
-   public Address getCurrentStateTransferSource() {
-      return currentStateTransferSource;
-   }
+    public final Map<Address, Response> invokeRemotely(Collection<Address> recipients, ReplicableCommand rpcCommand, ResponseMode mode, long timeout) throws Exception {
+        return invokeRemotely(recipients, rpcCommand, mode, timeout, false, null);
+    }
 
-   private ResponseMode getResponseMode(boolean sync) {
-      return sync ? ResponseMode.SYNCHRONOUS : ResponseMode.getAsyncResponseMode(configuration);
-   }
-
-   /**
-    * Checks whether any of the responses are exceptions. If yes, re-throws them (as exceptions or runtime exceptions).
-    */
-   private void checkResponses(Map<Address, Response> rsps) {
-      if (rsps != null) {
-         for (Map.Entry<Address, Response> rsp : rsps.entrySet()) {
-            if (rsp != null && rsp.getValue() instanceof Throwable) {
-               Throwable throwable = (Throwable) rsp.getValue();
-               if (trace)
-                  log.tracef("Received Throwable from remote node %s", throwable, rsp.getKey());
-               throw new RpcException(throwable);
+    public void retrieveState(String cacheName, long timeout) throws StateTransferException {
+        if (t.isSupportStateTransfer()) {
+            long initialWaitTime = configuration.getStateRetrievalInitialRetryWaitTime();
+            int waitTimeIncreaseFactor = configuration.getStateRetrievalRetryWaitTimeIncreaseFactor();
+            int numRetries = configuration.getStateRetrievalNumRetries();
+            List<Address> members = t.getMembers();
+            if (members.size() < 2) {
+                if (log.isDebugEnabled())
+                    log.debug("We're the only member in the cluster; no one to retrieve state from. Not doing anything!");
+                return;
             }
-         }
-      }
-   }
 
-   // -------------------------------------------- JMX information -----------------------------------------------
+            boolean success = false;
 
-   @ManagedOperation(description = "Resets statistics gathered by this component")
-   @Operation(displayName = "Reset statistics")
-   public void resetStatistics() {
-      replicationCount.set(0);
-      replicationFailures.set(0);
-      totalReplicationTime.set(0);
-   }
+            try {
+                long wait = initialWaitTime;
+                outer:
+                for (int i = 0; i < numRetries; i++) {
+                    for (Address member : members) {
+                        if (!member.equals(t.getAddress())) {
+                            try {
+                                if (log.isInfoEnabled()) log.tryingToFetchState(member);
+                                currentStateTransferSource = member;
+                                if (t.retrieveState(cacheName, member, timeout)) {
+                                    if (log.isInfoEnabled())
+                                        log.successfullyAppliedState(member);
+                                    success = true;
+                                    break outer;
+                                }
+                            } catch (StateTransferException e) {
+                                if (log.isDebugEnabled()) log.debug("Error while fetching state from member " + member, e);
+                            } finally {
+                                currentStateTransferSource = null;
+                            }
+                        }
+                    }
 
-   @ManagedAttribute(description = "Number of successful replications")
-   @Metric(displayName = "Number of successful replications", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
-   public long getReplicationCount() {
-      if (!isStatisticsEnabled()) {
-         return -1;
-      }
-      return replicationCount.get();
-   }
+                    if (!success) {
+                        log.couldNotFindPeerForState();
 
-   @ManagedAttribute(description = "Number of failed replications")
-   @Metric(displayName = "Number of failed replications", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
-   public long getReplicationFailures() {
-      if (!isStatisticsEnabled()) {
-         return -1;
-      }
-      return replicationFailures.get();
-   }
+                        try {
+                            Thread.sleep(wait *= waitTimeIncreaseFactor);
+                        }
+                        catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
 
-   @Metric(displayName = "Statistics enabled", dataType = DataType.TRAIT)
-   public boolean isStatisticsEnabled() {
-      return statisticsEnabled;
-   }
+                }
+            } finally {
+                currentStateTransferSource = null;
+            }
 
-   @Operation(displayName = "Enable/disable statistics")
-   public void setStatisticsEnabled(@Parameter(name = "enabled", description = "Whether statistics should be enabled or disabled (true/false)") boolean statisticsEnabled) {
-      this.statisticsEnabled = statisticsEnabled;
-   }
+            if (!success) throw new StateTransferException("Unable to fetch state on startup");
+        } else {
+            throw new StateTransferException("Transport does not, or is not configured to, support state transfer.  Please disable fetching state on startup, or reconfigure your transport.");
+        }
+    }
 
-   @ManagedAttribute(description = "Successful replications as a ratio of total replications")
-   public String getSuccessRatio() {
-      if (replicationCount.get() == 0 || !statisticsEnabled) {
-         return "N/A";
-      }
-      double ration = calculateSuccessRatio() * 100d;
-      return NumberFormat.getInstance().format(ration) + "%";
-   }
+    public final void broadcastRpcCommand(ReplicableCommand rpc, boolean sync) throws RpcException {
+        broadcastRpcCommand(rpc, sync, false);
+    }
 
-   @ManagedAttribute(description = "Successful replications as a ratio of total replications in numeric double format")
-   @Metric(displayName = "Successful replication ratio", units = Units.PERCENTAGE, displayType = DisplayType.SUMMARY)
-   public double getSuccessRatioFloatingPoint() {
-      if (replicationCount.get() == 0 || !statisticsEnabled) return 0;
-      return calculateSuccessRatio();
-   }
+    public final void broadcastRpcCommand(ReplicableCommand rpc, boolean sync, boolean usePriorityQueue) throws RpcException {
+        if (!totalOrderScheme && useReplicationQueue(sync)) { //pedro: added first condition
+            replicationQueue.add(rpc);
+        } else {
+            invokeRemotely(null, rpc, sync, usePriorityQueue);
+        }
+    }
 
-   private double calculateSuccessRatio() {
-      double totalCount = replicationCount.get() + replicationFailures.get();
-      return replicationCount.get() / totalCount;
-   }
+    public final void broadcastRpcCommandInFuture(ReplicableCommand rpc, NotifyingNotifiableFuture<Object> l) {
+        broadcastRpcCommandInFuture(rpc, false, l);
+    }
 
-   @ManagedAttribute(description = "The average time spent in the transport layer, in milliseconds")
-   @Metric(displayName = "Average time spent in the transport layer", units = Units.MILLISECONDS, displayType = DisplayType.SUMMARY)
-   public long getAverageReplicationTime() {
-      if (replicationCount.get() == 0) {
-         return 0;
-      }
-      return totalReplicationTime.get() / replicationCount.get();
-   }
+    public final void broadcastRpcCommandInFuture(ReplicableCommand rpc, boolean usePriorityQueue, NotifyingNotifiableFuture<Object> l) {
+        invokeRemotelyInFuture(null, rpc, usePriorityQueue, l);
+    }
 
-   // mainly for unit testing
-   public void setTransport(Transport t) {
-      this.t = t;
-   }
+    public final void invokeRemotely(Collection<Address> recipients, ReplicableCommand rpc, boolean sync) throws RpcException {
+        invokeRemotely(recipients, rpc, sync, false);
+    }
 
-   @Override
-   public Address getAddress() {
-      return t != null ? t.getAddress() : null;
-   }
+    public final Map<Address, Response> invokeRemotely(Collection<Address> recipients, ReplicableCommand rpc, boolean sync, boolean usePriorityQueue) throws RpcException {
+        return invokeRemotely(recipients, rpc, sync, usePriorityQueue, configuration.getSyncReplTimeout());
+    }
+
+    public final Map<Address, Response> invokeRemotely(Collection<Address> recipients, ReplicableCommand rpc, boolean sync, boolean usePriorityQueue, long timeout) throws RpcException {
+        if (trace) log.tracef("%s broadcasting call %s to recipient list %s", t.getAddress(), rpc, recipients);
+
+        if (!totalOrderScheme && useReplicationQueue(sync)) { //pedro: added first condition
+            replicationQueue.add(rpc);
+            return null;
+        } else {
+            if (!(rpc instanceof CacheRpcCommand)) {
+                rpc = cf.buildSingleRpcCommand(rpc);
+            }
+            Map<Address, Response> rsps = invokeRemotely(recipients, rpc, getResponseMode(sync), timeout, usePriorityQueue);
+            if (trace) log.tracef("Response(s) to %s is %s", rpc, rsps);
+            if (sync) checkResponses(rsps);
+            return rsps;
+        }
+    }
+
+    public final void invokeRemotelyInFuture(Collection<Address> recipients, ReplicableCommand rpc, NotifyingNotifiableFuture<Object> l) {
+        invokeRemotelyInFuture(recipients, rpc, false, l);
+    }
+
+    public final void invokeRemotelyInFuture(final Collection<Address> recipients, final ReplicableCommand rpc, final boolean usePriorityQueue, final NotifyingNotifiableFuture<Object> l) {
+        invokeRemotelyInFuture(recipients, rpc, usePriorityQueue, l, configuration.getSyncReplTimeout());
+    }
+
+    public final void invokeRemotelyInFuture(final Collection<Address> recipients, final ReplicableCommand rpc, final boolean usePriorityQueue, final NotifyingNotifiableFuture<Object> l, final long timeout) {
+        if (trace) log.tracef("%s invoking in future call %s to recipient list %s", t.getAddress(), rpc, recipients);
+        final CountDownLatch futureSet = new CountDownLatch(1);
+        Callable<Object> c = new Callable<Object>() {
+            public Object call() throws Exception {
+                Object result = null;
+                try {
+                    result = invokeRemotely(recipients, rpc, true, usePriorityQueue, timeout);
+                } finally {
+                    try {
+                        futureSet.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    } finally {
+                        l.notifyDone();
+                    }
+                }
+                return result;
+            }
+        };
+        l.setNetworkFuture(asyncExecutor.submit(c));
+        futureSet.countDown();
+    }
+
+    public Transport getTransport() {
+        return t;
+    }
+
+    public Address getCurrentStateTransferSource() {
+        return currentStateTransferSource;
+    }
+
+    private ResponseMode getResponseMode(boolean sync) {
+        return sync ? ResponseMode.SYNCHRONOUS : ResponseMode.getAsyncResponseMode(configuration);
+    }
+
+    /**
+     * Checks whether any of the responses are exceptions. If yes, re-throws them (as exceptions or runtime exceptions).
+     */
+    private void checkResponses(Map<Address, Response> rsps) {
+        if (rsps != null) {
+            for (Map.Entry<Address, Response> rsp : rsps.entrySet()) {
+                if (rsp != null && rsp.getValue() instanceof Throwable) {
+                    Throwable throwable = (Throwable) rsp.getValue();
+                    if (trace)
+                        log.tracef("Received Throwable from remote node %s", throwable, rsp.getKey());
+                    throw new RpcException(throwable);
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------- JMX information -----------------------------------------------
+
+    @ManagedOperation(description = "Resets statistics gathered by this component")
+    @Operation(displayName = "Reset statistics")
+    public void resetStatistics() {
+        replicationCount.set(0);
+        replicationFailures.set(0);
+        totalReplicationTime.set(0);
+    }
+
+    @ManagedAttribute(description = "Number of successful replications")
+    @Metric(displayName = "Number of successful replications", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getReplicationCount() {
+        if (!isStatisticsEnabled()) {
+            return -1;
+        }
+        return replicationCount.get();
+    }
+
+    @ManagedAttribute(description = "Number of failed replications")
+    @Metric(displayName = "Number of failed replications", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getReplicationFailures() {
+        if (!isStatisticsEnabled()) {
+            return -1;
+        }
+        return replicationFailures.get();
+    }
+
+    @Metric(displayName = "Statistics enabled", dataType = DataType.TRAIT)
+    public boolean isStatisticsEnabled() {
+        return statisticsEnabled;
+    }
+
+    @Operation(displayName = "Enable/disable statistics")
+    public void setStatisticsEnabled(@Parameter(name = "enabled", description = "Whether statistics should be enabled or disabled (true/false)") boolean statisticsEnabled) {
+        this.statisticsEnabled = statisticsEnabled;
+    }
+
+    @ManagedAttribute(description = "Successful replications as a ratio of total replications")
+    public String getSuccessRatio() {
+        if (replicationCount.get() == 0 || !statisticsEnabled) {
+            return "N/A";
+        }
+        double ration = calculateSuccessRatio() * 100d;
+        return NumberFormat.getInstance().format(ration) + "%";
+    }
+
+    @ManagedAttribute(description = "Successful replications as a ratio of total replications in numeric double format")
+    @Metric(displayName = "Successful replication ratio", units = Units.PERCENTAGE, displayType = DisplayType.SUMMARY)
+    public double getSuccessRatioFloatingPoint() {
+        if (replicationCount.get() == 0 || !statisticsEnabled) return 0;
+        return calculateSuccessRatio();
+    }
+
+    private double calculateSuccessRatio() {
+        double totalCount = replicationCount.get() + replicationFailures.get();
+        return replicationCount.get() / totalCount;
+    }
+
+    @ManagedAttribute(description = "The average time spent in the transport layer, in milliseconds")
+    @Metric(displayName = "Average time spent in the transport layer", units = Units.MILLISECONDS, displayType = DisplayType.SUMMARY)
+    public long getAverageReplicationTime() {
+        if (replicationCount.get() == 0) {
+            return 0;
+        }
+        return totalReplicationTime.get() / replicationCount.get();
+    }
+
+    // mainly for unit testing
+    public void setTransport(Transport t) {
+        this.t = t;
+    }
+
+    @Override
+    public Address getAddress() {
+        return t != null ? t.getAddress() : null;
+    }
 }

@@ -30,6 +30,8 @@ import org.infinispan.context.InvocationContext;
 import org.infinispan.notifications.cachelistener.CacheNotifier;
 
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -37,88 +39,100 @@ import java.util.Set;
  * @since 4.0
  */
 public class ClearCommand implements WriteCommand {
-   
-   public static final byte COMMAND_ID = 5;
-   CacheNotifier notifier;
-   private Set<Flag> flags;
 
-   public ClearCommand() {
-   }
+    public static final byte COMMAND_ID = 5;
+    CacheNotifier notifier;
+    private Set<Flag> flags;
+    private Map<Object, Object> writeSkewValues;
 
-   public ClearCommand(CacheNotifier notifier, Set<Flag> flags) {
-      this.notifier = notifier;
-      this.flags = flags;
-   }
+    public ClearCommand() {
+        writeSkewValues = new HashMap<Object, Object>();
+    }
 
-   public void init(CacheNotifier notifier) {
-      this.notifier = notifier;
-   }
+    public ClearCommand(CacheNotifier notifier, Set<Flag> flags) {
+        super();
+        this.notifier = notifier;
+        this.flags = flags;
+    }
 
-   public Object acceptVisitor(InvocationContext ctx, Visitor visitor) throws Throwable {
-      return visitor.visitClearCommand(ctx, this);
-   }
+    public void init(CacheNotifier notifier) {
+        this.notifier = notifier;
+    }
 
-   public Object perform(InvocationContext ctx) throws Throwable {
-      for (CacheEntry e : ctx.getLookedUpEntries().values()) {
-         if (e instanceof MVCCEntry) {
-            MVCCEntry me = (MVCCEntry) e;
-            Object k = me.getKey(), v = me.getValue();
-            notifier.notifyCacheEntryRemoved(k, v, true, ctx);
-            me.setRemoved(true);
-            me.setValid(false);
-            notifier.notifyCacheEntryRemoved(k, null, false, ctx);
-         }
-      }
-      return null;
-   }
+    public Object acceptVisitor(InvocationContext ctx, Visitor visitor) throws Throwable {
+        return visitor.visitClearCommand(ctx, this);
+    }
 
-   public Object[] getParameters() {
-      return new Object[]{flags};
-   }
+    public Object perform(InvocationContext ctx) throws Throwable {
+        for (CacheEntry e : ctx.getLookedUpEntries().values()) {
+            if (e instanceof MVCCEntry) {
+                MVCCEntry me = (MVCCEntry) e;
+                Object k = me.getKey(), v = me.getValue();
+                if(me.isRemoteWriteSkewNeeded() && !writeSkewValues.containsKey(k)) {
+                    writeSkewValues.put(k, v);
+                }
+                notifier.notifyCacheEntryRemoved(k, v, true, ctx);
+                me.setRemoved(true);
+                me.setValid(false);
+                notifier.notifyCacheEntryRemoved(k, null, false, ctx);
+            }
+        }
+        return null;
+    }
 
-   public byte getCommandId() {
-      return COMMAND_ID;
-   }
+    public Object[] getParameters() {
+        return new Object[]{writeSkewValues, flags};
+    }
 
-   public void setParameters(int commandId, Object[] parameters) {
-      if (commandId != COMMAND_ID) throw new IllegalStateException("Invalid command id");
-      if (parameters.length > 0) {
-         this.flags = (Set<Flag>) parameters[0];
-      }
-   }
+    public byte getCommandId() {
+        return COMMAND_ID;
+    }
 
-   public boolean shouldInvoke(InvocationContext ctx) {
-      return true;
-   }
+    public void setParameters(int commandId, Object[] parameters) {
+        if (commandId != COMMAND_ID) throw new IllegalStateException("Invalid command id");
+        writeSkewValues = (Map<Object, Object>) parameters[1];
+        if (parameters.length > 1) {
+            this.flags = (Set<Flag>) parameters[1];
+        }
+    }
 
-   @Override
-   public String toString() {
-      return new StringBuilder()
-         .append("ClearCommand{flags=")
-         .append(flags)
-         .append("}")
-         .toString();
-   }
+    public boolean shouldInvoke(InvocationContext ctx) {
+        return true;
+    }
 
-   public boolean isSuccessful() {
-      return true;
-   }
+    @Override
+    public String toString() {
+        return new StringBuilder()
+                .append("ClearCommand{flags=")
+                .append(flags)
+                .append("}")
+                .toString();
+    }
 
-   public boolean isConditional() {
-      return false;
-   }
+    public boolean isSuccessful() {
+        return true;
+    }
 
-   public Set<Object> getAffectedKeys() {
-      return Collections.emptySet();
-   }
+    public boolean isConditional() {
+        return false;
+    }
 
-   @Override
-   public Set<Flag> getFlags() {
-      return flags;
-   }
+    public Set<Object> getAffectedKeys() {
+        return Collections.emptySet();
+    }
 
-   @Override
-   public void setFlags(Set<Flag> flags) {
-      this.flags = flags;
-   }
+    @Override
+    public Set<Flag> getFlags() {
+        return flags;
+    }
+
+    @Override
+    public void setFlags(Set<Flag> flags) {
+        this.flags = flags;
+    }
+
+    @Override
+    public Map<Object, Object> getKeyAndValuesForWriteSkewCheck() {
+        return writeSkewValues;
+    }
 }

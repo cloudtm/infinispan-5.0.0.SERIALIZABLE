@@ -27,55 +27,63 @@ import org.infinispan.commands.Visitor;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.notifications.cachelistener.CacheNotifier;
 
+import java.util.Collections;
+import java.util.Map;
+
 /**
  * @author Mircea.Markus@jboss.com
  * @since 4.0
  */
 public class EvictCommand extends RemoveCommand implements LocalCommand {
 
-   public EvictCommand(Object key, CacheNotifier notifier) {
-      this.key = key;
-      this.notifier = notifier;
-   }
+    public EvictCommand(Object key, CacheNotifier notifier) {
+        this.key = key;
+        this.notifier = notifier;
+    }
 
-   public void initialize(CacheNotifier notifier) {
-      this.notifier = notifier;
-   }
+    public void initialize(CacheNotifier notifier) {
+        this.notifier = notifier;
+    }
 
-   @Override
-   public Object acceptVisitor(InvocationContext ctx, Visitor visitor) throws Throwable {
-      return visitor.visitEvictCommand(ctx, this);
-   }
+    @Override
+    public Object acceptVisitor(InvocationContext ctx, Visitor visitor) throws Throwable {
+        return visitor.visitEvictCommand(ctx, this);
+    }
 
-   @Override
-   public Object perform(InvocationContext ctx) throws Throwable {
-      if (key == null) {
-         throw new NullPointerException("Key is null!!");
-      }
-      super.perform(ctx);
-      return null;
-   }
+    @Override
+    public Object perform(InvocationContext ctx) throws Throwable {
+        if (key == null) {
+            throw new NullPointerException("Key is null!!");
+        }
+        super.perform(ctx);
+        return null;
+    }
 
-   @Override
-   public void notify(InvocationContext ctx, Object value, boolean isPre) {
-      if (!isPre) {
-         notifier.notifyCacheEntryEvicted(key, value, ctx);
-      }
-   }
+    @Override
+    public void notify(InvocationContext ctx, Object value, boolean isPre) {
+        if (!isPre) {
+            notifier.notifyCacheEntryEvicted(key, value, ctx);
+        }
+    }
 
-   @Override
-   public byte getCommandId() {
-      return -1; // these are not meant for replication!
-   }
-   
-   @Override
-   public String toString() {
-      return new StringBuilder()
-         .append("EvictCommand{key=")
-         .append(key)
-         .append(", value=").append(value)
-         .append(", flags=").append(flags)
-         .append("}")
-         .toString();
-   }
+    @Override
+    public byte getCommandId() {
+        return -1; // these are not meant for replication!
+    }
+
+    @Override
+    public String toString() {
+        return new StringBuilder()
+                .append("EvictCommand{key=")
+                .append(key)
+                .append(", value=").append(value)
+                .append(", flags=").append(flags)
+                .append("}")
+                .toString();
+    }
+
+    @Override
+    public Map<Object, Object> getKeyAndValuesForWriteSkewCheck() {
+        return Collections.emptyMap();
+    }
 }

@@ -25,6 +25,7 @@ package org.infinispan.util;
 import org.infinispan.CacheException;
 import org.infinispan.config.ConfigurationException;
 import org.infinispan.marshall.Marshaller;
+import org.infinispan.transaction.xa.GlobalTransaction;
 
 import javax.naming.Context;
 import java.io.Closeable;
@@ -344,6 +345,10 @@ public final class Util {
 
       return nf.format(toPrint) + " hours";
    }
+
+    public static String prettyPrintGlobalTransaction(GlobalTransaction gtx) {
+        return new StringBuilder(gtx.getAddress().toString()).append(":").append(gtx.getId()).toString();
+    }
 
    public static void close(Closeable cl) {
       if (cl == null) return;

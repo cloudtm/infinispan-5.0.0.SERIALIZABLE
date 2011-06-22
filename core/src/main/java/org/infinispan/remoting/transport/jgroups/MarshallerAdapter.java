@@ -33,7 +33,7 @@ import org.jgroups.util.Buffer;
  * @author Manik Surtani
  * @since 4.0
  */
-public class MarshallerAdapter implements RpcDispatcher.Marshaller2 {
+public class MarshallerAdapter implements RpcDispatcher.Marshaller {
    StreamingMarshaller m;
 
    public MarshallerAdapter(StreamingMarshaller m) {
@@ -44,7 +44,7 @@ public class MarshallerAdapter implements RpcDispatcher.Marshaller2 {
       return toBuffer(m.objectToBuffer(obj));
    }
 
-   public Object objectFromByteBuffer(byte[] buf, int offset, int length) throws Exception {
+   public Object objectFromBuffer(byte[] buf, int offset, int length) throws Exception {
       return m.objectFromByteBuffer(buf, offset, length);
    }
 

@@ -56,117 +56,119 @@ import java.util.concurrent.ExecutorService;
  */
 @Scope(Scopes.GLOBAL)
 public interface Transport extends Lifecycle {
-   // TODO discovery should be abstracted away into a separate set of interfaces such that it is not tightly coupled to the transport
+    // TODO discovery should be abstracted away into a separate set of interfaces such that it is not tightly coupled to the transport
 
-   @Inject
-   void setConfiguration(GlobalConfiguration gc);
+    @Inject
+    void setConfiguration(GlobalConfiguration gc);
 
-   /**
-    * Initializes the transport with global cache configuration and transport-specific properties.
-    *
-    * @param marshaller    marshaller to use for marshalling and unmarshalling
-    * @param asyncExecutor executor to use for asynchronous calls
-    * @param handler       handler for invoking remotely originating calls on the local cache
-    * @param notifier      notifier to use
-    */
-   @Inject
-   void initialize(StreamingMarshaller marshaller,
-                   @ComponentName(KnownComponentNames.ASYNC_TRANSPORT_EXECUTOR) ExecutorService asyncExecutor,
-                   InboundInvocationHandler handler, CacheManagerNotifier notifier);
+    public void enableLoopback();
 
-   /**
-    * Invokes an RPC call on other caches in the cluster.
-    *
-    * @param recipients       a list of Addresses to invoke the call on.  If this is null, the call is broadcast to the
-    *                         entire cluster.
-    * @param rpcCommand       the cache command to invoke
-    * @param mode             the response mode to use
-    * @param timeout          a timeout after which to throw a replication exception.
-    * @param usePriorityQueue if true, a priority queue is used to deliver messages.  May not be supported by all
-    *                         implementations.
-    * @param responseFilter   a response filter with which to filter out failed/unwanted/invalid responses.
-    * @param supportReplay    whether replays of missed messages is supported
-    * @return a map of responses from each member contacted.
-    * @throws Exception in the event of problems.
-    */
-   Map<Address, Response> invokeRemotely(Collection<Address> recipients, ReplicableCommand rpcCommand, ResponseMode mode, long timeout,
-                                 boolean usePriorityQueue, ResponseFilter responseFilter, boolean supportReplay) throws Exception;
+    /**
+     * Initializes the transport with global cache configuration and transport-specific properties.
+     *
+     * @param marshaller    marshaller to use for marshalling and unmarshalling
+     * @param asyncExecutor executor to use for asynchronous calls
+     * @param handler       handler for invoking remotely originating calls on the local cache
+     * @param notifier      notifier to use
+     */
+    @Inject
+    void initialize(StreamingMarshaller marshaller,
+                    @ComponentName(KnownComponentNames.ASYNC_TRANSPORT_EXECUTOR) ExecutorService asyncExecutor,
+                    InboundInvocationHandler handler, CacheManagerNotifier notifier);
 
-   /**
-    * @return true if the current Channel is the coordinator of the cluster.
-    */
-   boolean isCoordinator();
+    /**
+     * Invokes an RPC call on other caches in the cluster.
+     *
+     * @param recipients       a list of Addresses to invoke the call on.  If this is null, the call is broadcast to the
+     *                         entire cluster.
+     * @param rpcCommand       the cache command to invoke
+     * @param mode             the response mode to use
+     * @param timeout          a timeout after which to throw a replication exception.
+     * @param usePriorityQueue if true, a priority queue is used to deliver messages.  May not be supported by all
+     *                         implementations.
+     * @param responseFilter   a response filter with which to filter out failed/unwanted/invalid responses.
+     * @param supportReplay    whether replays of missed messages is supported
+     * @return a map of responses from each member contacted.
+     * @throws Exception in the event of problems.
+     */
+    Map<Address, Response> invokeRemotely(Collection<Address> recipients, ReplicableCommand rpcCommand, ResponseMode mode, long timeout,
+                                          boolean usePriorityQueue, ResponseFilter responseFilter, boolean supportReplay) throws Exception;
 
-   /**
-    * @return the Address of the current coordinator.
-    */
-   Address getCoordinator();
+    /**
+     * @return true if the current Channel is the coordinator of the cluster.
+     */
+    boolean isCoordinator();
 
-   /**
-    * Retrieves the current cache instance's network address
-    *
-    * @return an Address
-    */
-   Address getAddress();
+    /**
+     * @return the Address of the current coordinator.
+     */
+    Address getCoordinator();
 
-   /**
-    * Retrieves the current cache instance's physical network addresses. Some implementations might differentiate 
-    * between logical and physical addresses in which case, this method allows clients to query the physical ones 
-    * associated with the logical address. Implementations where logical and physical address are the same will simply 
-    * return a single entry List that contains the same Address as {@link #getAddress()}.
-    *
-    * @return an List of Address
-    */
-   List<Address> getPhysicalAddresses();
+    /**
+     * Retrieves the current cache instance's network address
+     *
+     * @return an Address
+     */
+    Address getAddress();
 
-   /**
-    * Returns a list of  members in the current cluster view.
-    *
-    * @return a list of members.  Typically, this would be defensively copied.
-    */
-   List<Address> getMembers();
+    /**
+     * Retrieves the current cache instance's physical network addresses. Some implementations might differentiate
+     * between logical and physical addresses in which case, this method allows clients to query the physical ones
+     * associated with the logical address. Implementations where logical and physical address are the same will simply
+     * return a single entry List that contains the same Address as {@link #getAddress()}.
+     *
+     * @return an List of Address
+     */
+    List<Address> getPhysicalAddresses();
 
-   /**
-    * Initiates a state retrieval from a specific cache (by typically invoking {@link
-    * org.infinispan.remoting.InboundInvocationHandler#generateState(String, java.io.OutputStream)}), and applies this
-    * state to the current cache via the  {@link InboundInvocationHandler#applyState(String, java.io.InputStream)}
-    * callback.
-    *
-    * @param cacheName name of cache for which to retrieve state
-    * @param address   address of remote cache from which to retrieve state
-    * @param timeout   state retrieval timeout in milliseconds
-    * @return true if state was transferred and applied successfully, false if it timed out.
-    * @throws org.infinispan.statetransfer.StateTransferException
-    *          if state cannot be retrieved from the specific cache
-    */
-   boolean retrieveState(String cacheName, Address address, long timeout) throws StateTransferException;
+    /**
+     * Returns a list of  members in the current cluster view.
+     *
+     * @return a list of members.  Typically, this would be defensively copied.
+     */
+    List<Address> getMembers();
 
-   /**
-    * @return an instance of a DistributedSync that can be used to wait for synchronization events across a cluster.
-    */
-   DistributedSync getDistributedSync();
+    /**
+     * Initiates a state retrieval from a specific cache (by typically invoking {@link
+     * org.infinispan.remoting.InboundInvocationHandler#generateState(String, java.io.OutputStream)}), and applies this
+     * state to the current cache via the  {@link InboundInvocationHandler#applyState(String, java.io.InputStream)}
+     * callback.
+     *
+     * @param cacheName name of cache for which to retrieve state
+     * @param address   address of remote cache from which to retrieve state
+     * @param timeout   state retrieval timeout in milliseconds
+     * @return true if state was transferred and applied successfully, false if it timed out.
+     * @throws org.infinispan.statetransfer.StateTransferException
+     *          if state cannot be retrieved from the specific cache
+     */
+    boolean retrieveState(String cacheName, Address address, long timeout) throws StateTransferException;
 
-   /**
-    * Tests whether the transport supports state transfer
-    *
-    * @return true if the implementation supports state transfer, false otherwise.
-    */
-   boolean isSupportStateTransfer();
-   
-   /**
-    * Tests whether the transport supports true multicast
-    * 
-    * @return true if the transport supports true multicast
-    */
-   boolean isMulticastCapable();
+    /**
+     * @return an instance of a DistributedSync that can be used to wait for synchronization events across a cluster.
+     */
+    DistributedSync getDistributedSync();
 
-   @Start(priority = 10)
-   void start();
+    /**
+     * Tests whether the transport supports state transfer
+     *
+     * @return true if the implementation supports state transfer, false otherwise.
+     */
+    boolean isSupportStateTransfer();
 
-   @Stop
-   void stop();
+    /**
+     * Tests whether the transport supports true multicast
+     *
+     * @return true if the transport supports true multicast
+     */
+    boolean isMulticastCapable();
 
-   int getViewId();
+    @Start(priority = 10)
+    void start();
 
-   Log getLog();
+    @Stop
+    void stop();
+
+    int getViewId();
+
+    Log getLog();
 }

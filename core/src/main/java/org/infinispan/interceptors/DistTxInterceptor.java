@@ -28,6 +28,7 @@ import org.infinispan.commands.VisitableCommand;
 import org.infinispan.commands.tx.CommitCommand;
 import org.infinispan.commands.tx.PrepareCommand;
 import org.infinispan.commands.tx.RollbackCommand;
+import org.infinispan.commands.tx.TotalOrderPrepareCommand;
 import org.infinispan.commands.write.ClearCommand;
 import org.infinispan.commands.write.DataWriteCommand;
 import org.infinispan.commands.write.PutKeyValueCommand;
@@ -193,4 +194,14 @@ public class DistTxInterceptor extends TxInterceptor {
          return command;
       }
    }
+
+    @Override
+    public Object visitTotalOrderPrepareCommand(TxInvocationContext ctx, TotalOrderPrepareCommand command) throws Throwable {
+        dm.getTransactionLogger().beforeCommand(command);
+      try {
+         return super.visitTotalOrderPrepareCommand(ctx, command);
+      } finally {
+         dm.getTransactionLogger().afterCommand(command);
+      }
+    }
 }

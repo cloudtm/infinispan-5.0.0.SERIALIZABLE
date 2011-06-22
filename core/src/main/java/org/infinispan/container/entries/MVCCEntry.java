@@ -32,18 +32,26 @@ import org.infinispan.container.DataContainer;
  */
 public interface MVCCEntry extends CacheEntry {
 
-   /**
-    * Makes internal copies of the entry for updates
-    *
-    * @param container      data container
-    * @param writeSkewCheck if true, write skews are tested for and exceptions are thrown if detected.  Only applicable
-    *                       to {@link org.infinispan.util.concurrent.IsolationLevel#REPEATABLE_READ}.
-    */
-   void copyForUpdate(DataContainer container, boolean writeSkewCheck);
+    /**
+     * Makes internal copies of the entry for updates
+     *
+     * @param container      data container
+     * @param writeSkewCheck if true, write skews are tested for and exceptions are thrown if detected.  Only applicable
+     *                       to {@link org.infinispan.util.concurrent.IsolationLevel#REPEATABLE_READ}.
+     * @param remoteWriteSkewCheck of true, write skew in remote context is done
+     */
+    void copyForUpdate(DataContainer container, boolean writeSkewCheck, boolean remoteWriteSkewCheck);
 
-   /**
-    * Marks an entry as a lock placeholder
-    * @param placeholder if true, the entry is marked as a lock placeholder.  If false, the entry is un-marked as a placeholder.
-    */
-   void setLockPlaceholder(boolean placeholder);
+    /**
+     * Marks an entry as a lock placeholder
+     * @param placeholder if true, the entry is marked as a lock placeholder.  If false, the entry is un-marked as a placeholder.
+     */
+    void setLockPlaceholder(boolean placeholder);
+
+    //PEDRO
+    /**
+     * returns true if we need to check the write skew for this key in remote context!
+     * @return true if the write skew in remote context is needed
+     */
+    boolean isRemoteWriteSkewNeeded();
 }

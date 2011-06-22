@@ -34,32 +34,40 @@ import org.infinispan.util.logging.LogFactory;
  * @since 4.0
  */
 public class RepeatableReadEntry extends ReadCommittedEntry {
-   private static final Log log = LogFactory.getLog(RepeatableReadEntry.class);
+    private static final Log log = LogFactory.getLog(RepeatableReadEntry.class);
+    private boolean remoteWriteSkew;
 
-   public RepeatableReadEntry(Object key, Object value, long lifespan) {
-      super(key, value, lifespan);
-   }
+    public RepeatableReadEntry(Object key, Object value, long lifespan) {
+        super(key, value, lifespan);
+    }
 
-   @Override
-   public void copyForUpdate(DataContainer container, boolean writeSkewCheck) {
-      if (isChanged()) return; // already copied
+    @Override
+    public void copyForUpdate(DataContainer container, boolean writeSkewCheck, boolean remoteWriteSkewCheck) {
+        if (isChanged()) return; // already copied
 
-      // mark entry as changed.
-      setChanged();
+        // mark entry as changed.
+        setChanged();
 
-      if (writeSkewCheck) {
-      // check for write skew.
-         InternalCacheEntry ice = container.get(key);
-         Object actualValue = ice == null ? null : ice.getValue();
+        if (writeSkewCheck) {
+            // check for write skew.
+            InternalCacheEntry ice = container.get(key);
+            Object actualValue = ice == null ? null : ice.getValue();
 
-         // Note that this identity-check is intentional.  We don't *want* to call actualValue.equals() since that defeats the purpose.
-         // the implicit "versioning" we have in R_R creates a new wrapper "value" instance for every update.
-         if (actualValue != null && actualValue != value) {
-            log.unableToCopyEntryForUpdate(getKey());
-            throw new CacheException("Detected write skew");
-         }
-      }
-      // make a backup copy
-      oldValue = value;
-   }
+            // Note that this identity-check is intentional.  We don't *want* to call actualValue.equals() since that defeats the purpose.
+            // the implicit "versioning" we have in R_R creates a new wrapper "value" instance for every update.
+            if (actualValue != null && actualValue != value) {
+                log.unableToCopyEntryForUpdate(getKey());
+                throw new CacheException("Detected write skew");
+            }
+
+            remoteWriteSkew = remoteWriteSkewCheck;
+        }
+        // make a backup copy
+        oldValue = value;
+    }
+
+    @Override
+    public boolean isRemoteWriteSkewNeeded() {
+        return remoteWriteSkew;
+    }
 }
