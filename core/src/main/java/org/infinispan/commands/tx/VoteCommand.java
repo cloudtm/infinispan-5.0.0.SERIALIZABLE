@@ -2,6 +2,7 @@ package org.infinispan.commands.tx;
 
 import org.infinispan.commands.Visitor;
 import org.infinispan.context.InvocationContext;
+import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.transaction.xa.GlobalTransaction;
 import org.infinispan.util.Util;
 
@@ -36,7 +37,7 @@ public class VoteCommand extends AbstractTransactionBoundaryCommand {
 
     @Override
     public Object acceptVisitor(InvocationContext ctx, Visitor visitor) throws Throwable {
-        return null;
+        return visitor.visitVoteCommand((TxInvocationContext) ctx, this);
     }
 
     @Override
@@ -55,9 +56,9 @@ public class VoteCommand extends AbstractTransactionBoundaryCommand {
     @Override
     public Object[] getParameters() {
         if(success) {
-            return new Object[] {globalTx, success, keysValidated};
+            return new Object[] {globalTx, cacheName, success, keysValidated};
         } else {
-            return new Object[] {globalTx, success};
+            return new Object[] {globalTx, cacheName, success};
         }
     }
 
@@ -65,9 +66,10 @@ public class VoteCommand extends AbstractTransactionBoundaryCommand {
     @Override
     public void setParameters(int commandId, Object[] args) {
         globalTx = (GlobalTransaction) args[0];
-        success = (Boolean) args[1];
+        cacheName = (String) args[1];
+        success = (Boolean) args[2];
         if(success) {
-            keysValidated = (Set<Object>) args[2];
+            keysValidated = (Set<Object>) args[3];
         }
     }
 

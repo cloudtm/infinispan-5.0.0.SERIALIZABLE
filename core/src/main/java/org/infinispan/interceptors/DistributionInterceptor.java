@@ -521,16 +521,18 @@ public class DistributionInterceptor extends BaseRpcInterceptor {
         if (shouldInvokeRemoteTxCommand(ctx)) {
             GlobalTransaction gtx = command.getGlobalTransaction();
 
-            Map<Object, Object> writeSkewValues = command.getKeysAndValuesForWriteSkewCheck();
-            if(!totMan.checkWriteSkew(writeSkewValues)) {
-                throw new WriteSkewException("Write Skew Check fails, before sending total order command, for keys " + writeSkewValues.keySet());
+            if(!command.isOnePhaseCommit()) {
+                Map<Object, Object> writeSkewValues = command.getKeysAndValuesForWriteSkewCheck();
+                if(!totMan.checkWriteSkew(writeSkewValues)) {
+                    throw new WriteSkewException("Write Skew Check fails, before sending total order command, for keys " + writeSkewValues.keySet());
+                }
+                if(log.isDebugEnabled()) {
+                    log.debugf("transaction %s must wait for votes for this keys %s",
+                            Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
+                            writeSkewValues.keySet().toString());
+                }
+                totMan.addKeyToBeValidated(gtx, writeSkewValues.keySet());
             }
-            if(log.isDebugEnabled()) {
-                log.debugf("transaction %s must wait for votes for this keys %s",
-                        Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
-                        writeSkewValues.keySet().toString());
-            }
-            totMan.addKeyToBeValidated(gtx, writeSkewValues.keySet());
 
             List<Address> recipients = dm.getAffectedNodes(ctx.getAffectedKeys());
 

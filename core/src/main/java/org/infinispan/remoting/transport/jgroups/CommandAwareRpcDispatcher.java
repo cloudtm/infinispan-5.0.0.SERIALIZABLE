@@ -76,20 +76,20 @@ public class CommandAwareRpcDispatcher extends RpcDispatcher {
     private static final boolean FORCE_MCAST = Boolean.getBoolean("infinispan.unsafe.force_multicast");
 
     //pedro
-    private boolean totalOrder;
+    private boolean totalOrderBased;
 
     public CommandAwareRpcDispatcher(Channel channel,
                                      JGroupsTransport transport,
                                      ExecutorService asyncExecutor,
                                      InboundInvocationHandler inboundInvocationHandler,
                                      JGroupsDistSync distributedSync, long distributedSyncTimeout,
-                                     boolean totalOrder) {
+                                     boolean totalOrderBased) {
         super(channel, transport, transport, transport);
         this.asyncExecutor = asyncExecutor;
         this.inboundInvocationHandler = inboundInvocationHandler;
         this.distributedSync = distributedSync;
         this.distributedSyncTimeout = distributedSyncTimeout;
-        this.totalOrder = totalOrder;
+        this.totalOrderBased = totalOrderBased;
     }
 
     protected final boolean isValid(Message req) {
@@ -113,7 +113,9 @@ public class CommandAwareRpcDispatcher extends RpcDispatcher {
             task.setMulticast(((TotalOrderPrepareCommand)command).isPartialReplication());
         }
         boolean vote = command instanceof VoteCommand;
-        boolean noFifoNeeded =  this.totalOrder && (command instanceof CommitCommand || command instanceof RollbackCommand);
+        boolean noFifoNeeded =  this.totalOrderBased && (command instanceof CommitCommand ||
+                command instanceof RollbackCommand ||
+                command instanceof VoteCommand);
 
         task.setTotalOrder(totalOrderCommand);
         task.setVote(vote);
@@ -276,8 +278,8 @@ public class CommandAwareRpcDispatcher extends RpcDispatcher {
 
                 //don't bundle and don't pass through flow control
                 Message msg = constructMessage(buf, gaddr);
-                msg.setFlag(Message.DONT_BUNDLE);
-                msg.setFlag(Message.NO_FC);
+                //msg.setFlag(Message.DONT_BUNDLE);
+                //msg.setFlag(Message.NO_FC);
                 msg.clearFlag(Message.NO_TOTAL_ORDER); //we want total order...
 
                 if(vote) {

@@ -291,6 +291,8 @@ public class TotalOrderInterceptor extends CommandInterceptor{
                         Util.prettyPrintGlobalTransaction(gtx));
             }
             totman.add2PhaseWaitingDuration(end - start);
+        } else {
+            remoteTx.commitOrRollbackCommandReceived();
         }
 
         if(remoteTx.canBeRemoved()) {

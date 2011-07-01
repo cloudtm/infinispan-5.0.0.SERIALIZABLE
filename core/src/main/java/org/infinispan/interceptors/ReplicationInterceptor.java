@@ -37,6 +37,7 @@ import org.infinispan.totalorder.WriteSkewException;
 import org.infinispan.util.concurrent.NotifyingFutureImpl;
 import org.infinispan.util.concurrent.NotifyingNotifiableFuture;
 
+import java.util.Collections;
 import java.util.Map;
 
 /**
@@ -138,12 +139,15 @@ public class ReplicationInterceptor extends BaseRpcInterceptor {
     public Object visitTotalOrderPrepareCommand(TxInvocationContext ctx, TotalOrderPrepareCommand command) throws Throwable {
         Object retVal = invokeNextInterceptor(ctx, command);
         if (shouldInvokeRemoteTxCommand(ctx)) {
-            Map<Object, Object> writeSkewValues = command.getKeysAndValuesForWriteSkewCheck();
-            if(!totman.checkWriteSkew(writeSkewValues)) {
-                throw new WriteSkewException("Write Skew Check fails, before sending total order command, for keys " + writeSkewValues.keySet());
+            if(!command.isOnePhaseCommit()) {
+                Map<Object, Object> writeSkewValues = command.getKeysAndValuesForWriteSkewCheck();
+                if(!totman.checkWriteSkew(writeSkewValues)) {
+                    throw new WriteSkewException("Write Skew Check fails, before sending total order command, for keys " + writeSkewValues.keySet());
+                }
             }
 
             rpcManager.broadcastRpcCommand(command, false, false);
+            totman.addKeyToBeValidated(command.getGlobalTransaction(), Collections.<Object>emptySet());
             retVal = totman.waitValidation(command.getGlobalTransaction());
         }
         return retVal;

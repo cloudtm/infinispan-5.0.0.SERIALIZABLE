@@ -42,6 +42,11 @@ public class DistTotalOrderInterceptor extends TotalOrderInterceptor {
 
     @Override
     public Object visitVoteCommand(TxInvocationContext ctx, VoteCommand command) throws Throwable {
+        if(log.isDebugEnabled()) {
+            log.debugf("vote received for transactions %s. vote is %s",
+                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
+                    command.toString());
+        }
         totman.addVote(command.getGlobalTransaction(), command.isVoteOK(), command.getValidatedKeys());
         return null;
     }
@@ -61,7 +66,7 @@ public class DistTotalOrderInterceptor extends TotalOrderInterceptor {
                     //the tx is not local
                     VoteCommand vote = commandsFactory.buildVoteCommand(gtx, txResult, keysValidated);
                     if(log.isDebugEnabled()) {
-                        log.debugf("sending this %s", vote.toString());
+                        log.debugf("sending this %s to %s", vote.toString(), gtx.getAddress().toString());
                     }
                     rpcManager.invokeRemotely(Collections.singleton(gtx.getAddress()), vote, false);
                 } else {
