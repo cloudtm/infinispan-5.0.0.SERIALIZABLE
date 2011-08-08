@@ -45,6 +45,7 @@ import org.infinispan.jmx.annotations.ManagedAttribute;
 import org.infinispan.jmx.annotations.ManagedOperation;
 import org.infinispan.loaders.CacheLoaderManager;
 import org.infinispan.loaders.CacheStore;
+import org.infinispan.mvcc.ReplGroup;
 import org.infinispan.notifications.Listener;
 import org.infinispan.notifications.cachelistener.CacheNotifier;
 import org.infinispan.notifications.cachemanagerlistener.CacheManagerNotifier;
@@ -444,7 +445,12 @@ public class DistributionManagerImpl implements DistributionManager {
       }
    }
 
-   @Listener
+    @Override
+    public ReplGroup locateGroup(Object key) {
+        return getConsistentHash().getGroupFor(key, getReplCount());
+    }
+
+    @Listener
    public class ViewChangeListener {
       @Merged @ViewChanged
       public void handleViewChange(ViewChangedEvent e) {

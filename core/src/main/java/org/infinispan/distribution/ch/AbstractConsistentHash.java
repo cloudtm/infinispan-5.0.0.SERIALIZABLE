@@ -23,15 +23,10 @@
 package org.infinispan.distribution.ch;
 
 import org.infinispan.distribution.group.GroupManager;
+import org.infinispan.mvcc.ReplGroup;
 import org.infinispan.remoting.transport.Address;
 
-import java.util.Collection;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 
 /**
  * An abstract consistent hash implementation that handles common implementations of certain methods.  In particular,
@@ -47,60 +42,64 @@ import java.util.TreeSet;
  */
 public abstract class AbstractConsistentHash implements ConsistentHash {
 
-   protected Set<Address> caches;
-   
-   protected GroupManager groupManager;
+    protected Set<Address> caches;
 
-   @Override
-   public void setCaches(Set<Address> caches) {
-      this.caches = new TreeSet<Address>(new Comparator<Address>() {
-         @Override
-         public int compare(Address o1, Address o2) {
-            return o1.hashCode() - o2.hashCode();
-         }
-      });
+    protected GroupManager groupManager;
 
-      for (Address a: caches) this.caches.add(a);
-   }
+    @Override
+    public void setCaches(Set<Address> caches) {
+        this.caches = new TreeSet<Address>(new Comparator<Address>() {
+            @Override
+            public int compare(Address o1, Address o2) {
+                return o1.hashCode() - o2.hashCode();
+            }
+        });
 
-   @Override
-   public Set<Address> getCaches() {
-      return caches;
-   }
+        for (Address a: caches) this.caches.add(a);
+    }
 
-   @Override
-   public Map<Object, List<Address>> locateAll(Collection<Object> keys, int replCount) {
-      Map<Object, List<Address>> locations = new HashMap<Object, List<Address>>();
-      for (Object k : keys) locations.put(k, locate(k, replCount));
-      return locations;
-   }
+    @Override
+    public Set<Address> getCaches() {
+        return caches;
+    }
 
-   @Override
-   public boolean isKeyLocalToAddress(Address a, Object key, int replCount) {
-      // simple, brute-force impl
-      return locate(key, replCount).contains(a);
-   }
+    @Override
+    public Map<Object, List<Address>> locateAll(Collection<Object> keys, int replCount) {
+        Map<Object, List<Address>> locations = new HashMap<Object, List<Address>>();
+        for (Object k : keys) locations.put(k, locate(k, replCount));
+        return locations;
+    }
 
-   public void setGroupManager(GroupManager groupManager) {
-      this.groupManager = groupManager;
-   }
+    @Override
+    public boolean isKeyLocalToAddress(Address a, Object key, int replCount) {
+        // simple, brute-force impl
+        return locate(key, replCount).contains(a);
+    }
 
-   @Override
-   public String toString() {
-      return getClass().getSimpleName() + " {" +
-            "caches=" + caches +
-            '}';
-   }
-   
-   /**
-    * Get the grouping, if any, for this key.
-    * 
-    * @param key the key to get the grouping for
-    * @return the group, or if no group is applicable, the key
-    */
-   protected Object getGrouping(Object key) {
-       String group = groupManager != null ? groupManager.getGroup(key) : null;
-       return group != null ? group : key;
-   }
-   
+    public void setGroupManager(GroupManager groupManager) {
+        this.groupManager = groupManager;
+    }
+
+    @Override
+    public String toString() {
+        return getClass().getSimpleName() + " {" +
+                "caches=" + caches +
+                '}';
+    }
+
+    /**
+     * Get the grouping, if any, for this key.
+     *
+     * @param key the key to get the grouping for
+     * @return the group, or if no group is applicable, the key
+     */
+    protected Object getGrouping(Object key) {
+        String group = groupManager != null ? groupManager.getGroup(key) : null;
+        return group != null ? group : key;
+    }
+
+    @Override
+    public ReplGroup getGroupFor(Object key, int replCount) {
+        throw new UnsupportedOperationException();
+    }
 }

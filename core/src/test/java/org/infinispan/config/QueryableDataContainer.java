@@ -22,108 +22,179 @@
  */
 package org.infinispan.config;
 
-import static java.util.Collections.synchronizedCollection;
+import org.infinispan.container.DataContainer;
+import org.infinispan.container.entries.InternalCacheEntry;
+import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.VersionVC;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.Set;
 
-import org.infinispan.container.DataContainer;
-import org.infinispan.container.entries.InternalCacheEntry;
+import static java.util.Collections.synchronizedCollection;
 
 public class QueryableDataContainer implements DataContainer {
-	
-	private static DataContainer delegate;
-	
-	public static void setDelegate(DataContainer delegate) {
-	   QueryableDataContainer.delegate = delegate;
-   }
-	
-	private final Collection<String> loggedOperations;
-	
-	public void setFoo(String foo) {
-		loggedOperations.add("setFoo(" + foo + ")");
-	}
 
-	public QueryableDataContainer() {
-	   this.loggedOperations = synchronizedCollection(new ArrayList<String>());
-   }
-	
-	@Override
-	public Iterator<InternalCacheEntry> iterator() {
-		loggedOperations.add("iterator()");
-		return delegate.iterator();
-	}
+    private static DataContainer delegate;
 
-	@Override
-	public InternalCacheEntry get(Object k) {
-		loggedOperations.add("get(" + k + ")" );
-		return delegate.get(k);
-	}
+    public static void setDelegate(DataContainer delegate) {
+        QueryableDataContainer.delegate = delegate;
+    }
 
-	@Override
-	public InternalCacheEntry peek(Object k) {
-		loggedOperations.add("peek(" + k + ")" );
-		return delegate.peek(k);
-	}
+    private final Collection<String> loggedOperations;
 
-	@Override
-	public void put(Object k, Object v, long lifespan, long maxIdle) {
-		loggedOperations.add("put(" + k + ", " + v + ", " + lifespan + ", " + maxIdle + ")");
-		delegate.put(k, v, lifespan, maxIdle);
-	}
+    public void setFoo(String foo) {
+        loggedOperations.add("setFoo(" + foo + ")");
+    }
 
-	@Override
-	public boolean containsKey(Object k) {
-		loggedOperations.add("containsKey(" + k + ")" );
-		return delegate.containsKey(k);
-	}
+    public QueryableDataContainer() {
+        this.loggedOperations = synchronizedCollection(new ArrayList<String>());
+    }
 
-	@Override
-	public InternalCacheEntry remove(Object k) {
-		loggedOperations.add("remove(" + k + ")" );
-		return delegate.remove(k);
-	}
+    @Override
+    public Iterator<InternalCacheEntry> iterator() {
+        loggedOperations.add("iterator()");
+        return delegate.iterator();
+    }
 
-	@Override
-	public int size() {
-		loggedOperations.add("size()" );
-		return delegate.size();
-	}
+    @Override
+    public InternalCacheEntry get(Object k) {
+        loggedOperations.add("get(" + k + ")" );
+        return delegate.get(k);
+    }
 
-	@Override
-	public void clear() {
-		loggedOperations.add("clear()" );
-		delegate.clear();
-	}
+    @Override
+    public InternalCacheEntry peek(Object k) {
+        loggedOperations.add("peek(" + k + ")" );
+        return delegate.peek(k);
+    }
 
-	@Override
-	public Set<Object> keySet() {
-		loggedOperations.add("keySet()" );
-		return delegate.keySet();
-	}
+    @Override
+    public void put(Object k, Object v, long lifespan, long maxIdle) {
+        loggedOperations.add("put(" + k + ", " + v + ", " + lifespan + ", " + maxIdle + ")");
+        delegate.put(k, v, lifespan, maxIdle);
+    }
 
-	@Override
-	public Collection<Object> values() {
-		loggedOperations.add("values()" );
-		return delegate.values();
-	}
+    @Override
+    public boolean containsKey(Object k) {
+        loggedOperations.add("containsKey(" + k + ")" );
+        return delegate.containsKey(k);
+    }
 
-	@Override
-	public Set<InternalCacheEntry> entrySet() {
-		loggedOperations.add("entrySet()" );
-		return delegate.entrySet();
-	}
+    @Override
+    public InternalCacheEntry remove(Object k) {
+        loggedOperations.add("remove(" + k + ")" );
+        return delegate.remove(k);
+    }
 
-	@Override
-	public void purgeExpired() {
-		loggedOperations.add("purgeExpired()" );
-		delegate.purgeExpired();
-	}
-	
-	public Collection<String> getLoggedOperations() {
-	   return loggedOperations;
-   }
+    @Override
+    public int size() {
+        loggedOperations.add("size()" );
+        return delegate.size();
+    }
 
+    @Override
+    public void clear() {
+        loggedOperations.add("clear()" );
+        delegate.clear();
+    }
+
+    @Override
+    public Set<Object> keySet() {
+        loggedOperations.add("keySet()" );
+        return delegate.keySet();
+    }
+
+    @Override
+    public Collection<Object> values() {
+        loggedOperations.add("values()" );
+        return delegate.values();
+    }
+
+    @Override
+    public Set<InternalCacheEntry> entrySet() {
+        loggedOperations.add("entrySet()" );
+        return delegate.entrySet();
+    }
+
+    @Override
+    public void purgeExpired() {
+        loggedOperations.add("purgeExpired()" );
+        delegate.purgeExpired();
+    }
+
+    public Collection<String> getLoggedOperations() {
+        return loggedOperations;
+    }
+
+    /*
+     * =========== added by Pedro =============
+     */
+
+    @Override
+    public InternalMVCCEntry get(Object k, VersionVC max) {
+        loggedOperations.add("get(" + k + ", " + max + ")");
+        return delegate.get(k,max);
+    }
+
+    @Override
+    public InternalMVCCEntry peek(Object k, VersionVC max) {
+        loggedOperations.add("peek(" + k + ", " + max + ")");
+        return delegate.peek(k, max);
+    }
+
+    @Override
+    public void put(Object k, Object v, long lifespan, long maxIdle, VersionVC version) {
+        loggedOperations.add("put(" + k + ", " + v + ", " + lifespan + ", " + maxIdle + ", " + version + ")");
+        delegate.put(k, v, lifespan, maxIdle, version);
+    }
+
+    @Override
+    public boolean containsKey(Object k, VersionVC max) {
+        loggedOperations.add("containsKey(" + k + ", " + max + ")" );
+        return delegate.containsKey(k,max);
+    }
+
+    @Override
+    public InternalCacheEntry remove(Object k, VersionVC version) {
+        loggedOperations.add("remove(" + k + ", " + version + ")" );
+        return delegate.remove(k, version);
+    }
+
+    @Override
+    public int size(VersionVC max) {
+        loggedOperations.add("size(" + max + ")" );
+        return delegate.size(max);
+    }
+
+    @Override
+    public void clear(VersionVC version) {
+        loggedOperations.add("clear(" + version + ")" );
+        delegate.clear(version);
+    }
+
+    @Override
+    public Set<Object> keySet(VersionVC max) {
+        loggedOperations.add("keySet(" + max + ")" );
+        return delegate.keySet(max);
+    }
+
+    @Override
+    public Collection<Object> values(VersionVC max) {
+        loggedOperations.add("values(" + max + ")" );
+        return delegate.values(max);
+    }
+
+    @Override
+    public Set<InternalCacheEntry> entrySet(VersionVC max) {
+        loggedOperations.add("entrySet(" + max + ")" );
+        return delegate.entrySet(max);
+    }
+
+    @Override
+    public void purgeExpired(VersionVC version) {
+        loggedOperations.add("purgeExpired(" + version + ")" );
+        delegate.purgeExpired(version);
+    }
 }
