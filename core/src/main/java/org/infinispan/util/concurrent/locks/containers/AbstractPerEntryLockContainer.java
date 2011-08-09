@@ -66,7 +66,7 @@ public abstract class AbstractPerEntryLockContainer implements LockContainer {
    public Lock acquireLock(Object key, long timeout, TimeUnit unit) throws InterruptedException {
       while (true) {
          Lock lock = getLock(key);
-         boolean locked = false;
+         boolean locked;
          try {
             locked = lock.tryLock(timeout, unit);
          } catch (InterruptedException ie) {

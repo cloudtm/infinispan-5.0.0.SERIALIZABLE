@@ -1,4 +1,4 @@
-package org.infinispan.util.concurrent.locks;
+package org.infinispan.util.concurrent.locks.containers.readwritelock;
 
 import org.infinispan.context.InvocationContextContainer;
 
@@ -15,7 +15,7 @@ import java.util.concurrent.locks.ReadWriteLock;
  */
 public class OwnableReentrantReadWriteLock implements ReadWriteLock {
     private Map<Object, Integer> readers;
-    private Object writer;
+    private volatile Object writer;
     private int writeAccesses;
 
     private final Object mutex = new Object();
@@ -239,5 +239,25 @@ public class OwnableReentrantReadWriteLock implements ReadWriteLock {
     @Override
     public Lock writeLock() {
         return writeLock;
+    }
+
+    public boolean isReadOrWriteLocked() {
+        return writer != null || !readers.isEmpty();
+    }
+
+    public boolean isWriteLock() {
+        return writer != null;
+    }
+
+    public Object getOwner() {
+        return writer;
+    }
+
+    @Override
+    public String toString() {
+        return new StringBuilder("OwnableReentrantReadWriteLock{")
+                .append("readers=").append(readers.keySet())
+                .append("writer=").append(writer)
+                .append("}").toString();
     }
 }

@@ -86,7 +86,7 @@ public abstract class AbstractStripedLockContainer implements LockContainer {
 
    public Lock acquireLock(Object key, long timeout, TimeUnit unit) throws InterruptedException {
       Lock lock = getLock(key);
-      boolean locked = false;
+      boolean locked;
       try {
          locked = lock.tryLock(timeout, unit);
       } catch (InterruptedException ie) {
