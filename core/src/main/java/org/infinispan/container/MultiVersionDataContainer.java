@@ -2,6 +2,7 @@ package org.infinispan.container;
 
 import org.infinispan.container.entries.InternalCacheEntry;
 import org.infinispan.container.entries.InternalEntryFactory;
+import org.infinispan.factories.annotations.Inject;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.CommitLog;
 import org.infinispan.mvcc.VBox;
@@ -18,12 +19,11 @@ import java.util.concurrent.ConcurrentMap;
  */
 public class MultiVersionDataContainer implements DataContainer {
 
-    private final CommitLog commitLog;
+    private CommitLog commitLog;
     private final InternalEntryFactory entryFactory;
     private final ConcurrentMap<Object, VBox> entries;
 
     public MultiVersionDataContainer(int concurrencyLevel) {
-        commitLog = new CommitLog();
         entryFactory = new InternalEntryFactory();
         entries = new ConcurrentHashMap<Object, VBox>(128, 0.75f, concurrencyLevel);
     }
@@ -47,6 +47,11 @@ public class MultiVersionDataContainer implements DataContainer {
             }
         }
         return vbox;
+    }
+
+    @Inject
+    public void inject(CommitLog commitLog) {
+        this.commitLog = commitLog;
     }
 
     //TODO como expirar as chaves!!??

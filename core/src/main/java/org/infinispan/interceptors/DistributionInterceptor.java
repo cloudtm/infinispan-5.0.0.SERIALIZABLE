@@ -22,6 +22,7 @@
  */
 package org.infinispan.interceptors;
 
+import org.infinispan.CacheException;
 import org.infinispan.commands.CommandsFactory;
 import org.infinispan.commands.control.LockControlCommand;
 import org.infinispan.commands.read.GetKeyValueCommand;
@@ -49,6 +50,7 @@ import org.infinispan.distribution.L1Manager;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.factories.annotations.Start;
 import org.infinispan.interceptors.base.BaseRpcInterceptor;
+import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.remoting.responses.Response;
 import org.infinispan.remoting.responses.SuccessfulResponse;
 import org.infinispan.remoting.transport.Address;
@@ -125,6 +127,7 @@ public class DistributionInterceptor extends BaseRpcInterceptor {
         // so we need to check whether join has completed as well.
         boolean isRehashInProgress = !dm.isJoinComplete() || dm.isRehashInProgress();
         Object returnValue = invokeNextInterceptor(ctx, command);
+        Object key = command.getKey();
 
         // If L1 caching is enabled, this is a remote command, and we found a value in our cache
         // we store it so that we can later invalidate it
@@ -134,8 +137,13 @@ public class DistributionInterceptor extends BaseRpcInterceptor {
 
         // need to check in the context as well since a null retval is not necessarily an indication of the entry not being
         // available.  It could just have been removed in the same tx beforehand.
-        if (needsRemoteGet(ctx, command.getKey(), returnValue == null))
+        if (needsRemoteGet(ctx, command.getKey(), returnValue == null)) {
             returnValue = remoteGetAndStoreInL1(ctx, command.getKey(), isRehashInProgress, false);
+        } else {
+            int idx = (int) dm.locateGroup(key).getId();
+            ((TxInvocationContext) ctx).markReadFrom(idx);
+        }
+
         return returnValue;
     }
 

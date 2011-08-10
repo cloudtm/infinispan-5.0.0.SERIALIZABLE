@@ -45,6 +45,7 @@ import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.factories.annotations.Start;
 import org.infinispan.interceptors.base.CommandInterceptor;
+import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.remoting.transport.Transport;
 import org.infinispan.transaction.xa.GlobalTransaction;
@@ -144,6 +145,16 @@ public class LockingInterceptor extends CommandInterceptor {
             return invokeNextInterceptor(ctx, command);
         } finally {
             doAfterCall(ctx);
+            if(ctx.isInTxScope()) {
+                //update vc
+                InternalMVCCEntry ime = ((TxInvocationContext) ctx).getReadKey(command.getKey());
+                if(((TxInvocationContext) ctx).hasModifications() && !ime.isMostRecent()) {
+                    throw new CacheException("serializability fail!!");
+                    //read an old value... the tx will abort in commit,
+                    //so, do not waste time and abort it now
+                }
+                ((TxInvocationContext) ctx).updateVectorClock(ime.getVersion());
+            }
         }
     }
 

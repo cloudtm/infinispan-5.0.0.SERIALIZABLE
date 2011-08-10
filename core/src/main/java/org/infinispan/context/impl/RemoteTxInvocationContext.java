@@ -24,6 +24,8 @@ package org.infinispan.context.impl;
 
 import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.container.entries.CacheEntry;
+import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.transaction.AbstractCacheTransaction;
 import org.infinispan.transaction.RemoteTransaction;
 import org.infinispan.transaction.xa.GlobalTransaction;
@@ -43,90 +45,121 @@ import java.util.Map;
 public class RemoteTxInvocationContext extends AbstractTxInvocationContext {
 
 
-   private RemoteTransaction remoteTransaction;
+    private RemoteTransaction remoteTransaction;
 
-   public RemoteTxInvocationContext() {
-   }
+    public RemoteTxInvocationContext() {
+    }
 
-   public Transaction getTransaction() {
-      // this method is only valid for locally originated transactions!
-      return null;
-   }
+    public Transaction getTransaction() {
+        // this method is only valid for locally originated transactions!
+        return null;
+    }
 
-   @Override
-   public boolean isTransactionValid() {
-      // this is always true since we are governed by the originator's transaction
-      return true;
-   }
+    @Override
+    public boolean isTransactionValid() {
+        // this is always true since we are governed by the originator's transaction
+        return true;
+    }
 
-   public Object getLockOwner() {
-      return remoteTransaction.getGlobalTransaction();
-   }
+    public Object getLockOwner() {
+        return remoteTransaction.getGlobalTransaction();
+    }
 
-   public GlobalTransaction getGlobalTransaction() {
-      return remoteTransaction.getGlobalTransaction();
-   }
+    public GlobalTransaction getGlobalTransaction() {
+        return remoteTransaction.getGlobalTransaction();
+    }
 
-   public boolean isOriginLocal() {
-      return false;
-   }
+    public boolean isOriginLocal() {
+        return false;
+    }
 
-   public List<WriteCommand> getModifications() {
-      return remoteTransaction.getModifications();
-   }
+    public List<WriteCommand> getModifications() {
+        return remoteTransaction.getModifications();
+    }
 
-   public void setRemoteTransaction(RemoteTransaction remoteTransaction) {
-      this.remoteTransaction = remoteTransaction;
-   }
+    public void setRemoteTransaction(RemoteTransaction remoteTransaction) {
+        this.remoteTransaction = remoteTransaction;
+    }
 
-   public CacheEntry lookupEntry(Object key) {
-      return remoteTransaction.lookupEntry(key);
-   }
+    public CacheEntry lookupEntry(Object key) {
+        return remoteTransaction.lookupEntry(key);
+    }
 
-   public BidirectionalMap<Object, CacheEntry> getLookedUpEntries() {
-      return remoteTransaction.getLookedUpEntries();
-   }
+    public BidirectionalMap<Object, CacheEntry> getLookedUpEntries() {
+        return remoteTransaction.getLookedUpEntries();
+    }
 
-   public void putLookedUpEntry(Object key, CacheEntry e) {
-      remoteTransaction.putLookedUpEntry(key, e);
-   }
+    public void putLookedUpEntry(Object key, CacheEntry e) {
+        remoteTransaction.putLookedUpEntry(key, e);
+    }
 
-   public void removeLookedUpEntry(Object key) {
-      remoteTransaction.removeLookedUpEntry(key);
-   }
+    public void removeLookedUpEntry(Object key) {
+        remoteTransaction.removeLookedUpEntry(key);
+    }
 
-   public void clearLookedUpEntries() {
-      remoteTransaction.clearLookedUpEntries();
-   }
+    public void clearLookedUpEntries() {
+        remoteTransaction.clearLookedUpEntries();
+    }
 
-   public void putLookedUpEntries(Map<Object, CacheEntry> lookedUpEntries) {
-      for (Map.Entry<Object, CacheEntry> ce: lookedUpEntries.entrySet()) {
-         remoteTransaction.putLookedUpEntry(ce.getKey(), ce.getValue());
-      }
-   }
+    public void putLookedUpEntries(Map<Object, CacheEntry> lookedUpEntries) {
+        for (Map.Entry<Object, CacheEntry> ce: lookedUpEntries.entrySet()) {
+            remoteTransaction.putLookedUpEntry(ce.getKey(), ce.getValue());
+        }
+    }
 
-   @Override
-   public boolean equals(Object o) {
-      if (this == o) return true;
-      if (!(o instanceof RemoteTxInvocationContext)) return false;
-      RemoteTxInvocationContext that = (RemoteTxInvocationContext) o;
-      return remoteTransaction.equals(that.remoteTransaction);
-   }
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof RemoteTxInvocationContext)) return false;
+        RemoteTxInvocationContext that = (RemoteTxInvocationContext) o;
+        return remoteTransaction.equals(that.remoteTransaction);
+    }
 
-   @Override
-   public int hashCode() {
-      return remoteTransaction.hashCode();
-   }
+    @Override
+    public int hashCode() {
+        return remoteTransaction.hashCode();
+    }
 
-   @Override
-   public RemoteTxInvocationContext clone() {
-      RemoteTxInvocationContext dolly = (RemoteTxInvocationContext) super.clone();
-      dolly.remoteTransaction = (RemoteTransaction) remoteTransaction.clone();
-      return dolly;
-   }
+    @Override
+    public RemoteTxInvocationContext clone() {
+        RemoteTxInvocationContext dolly = (RemoteTxInvocationContext) super.clone();
+        dolly.remoteTransaction = (RemoteTransaction) remoteTransaction.clone();
+        return dolly;
+    }
 
-   @Override
-   public AbstractCacheTransaction getCacheTrasaction() {
-      return remoteTransaction;
-   }
+    @Override
+    public AbstractCacheTransaction getCacheTransaction() {
+        return remoteTransaction;
+    }
+
+    @Override
+    public void addReadKey(Object key, InternalMVCCEntry ime) {
+        //no-op
+    }
+
+    @Override
+    public void markReadFrom(int idx) {
+        //no-op
+    }
+
+    @Override
+    public InternalMVCCEntry getReadKey(Object Key) {
+        return null; //no-op
+    }
+
+    @Override
+    public VersionVC calculateVersionToRead() {
+        return null; //no-op
+    }
+
+    @Override
+    public void updateVectorClock(VersionVC other) {
+        //no-op
+    }
+
+    @Override
+    public long getVectorClockValueIn(int idx) {
+        return VersionVC.EMPTY_POSITION;
+    }
+
 }

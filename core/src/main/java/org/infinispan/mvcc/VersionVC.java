@@ -8,6 +8,8 @@ import java.util.Map;
  *         Date: 25-07-2011
  */
 public class VersionVC {
+    public static final long EMPTY_POSITION = -1;
+
     private Map<Object,Long> vectorClock;
 
     public VersionVC() {
@@ -79,7 +81,7 @@ public class VersionVC {
 
     public long get(Object position) {
         Long l = vectorClock.get(position);
-        return l != null ? l : Long.MAX_VALUE;
+        return l != null ? l : -1;
     }
 
     public void set(Object position, long value) {
@@ -113,6 +115,6 @@ public class VersionVC {
 
     @Override
     public String toString() {
-        return "{Version vc=" + vectorClock + "}";
+        return "Version{vc=" + vectorClock + "}";
     }
 }

@@ -24,6 +24,7 @@ package org.infinispan.transaction;
 
 import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.container.entries.CacheEntry;
+import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.transaction.xa.GlobalTransaction;
 import org.infinispan.transaction.xa.InvalidTransactionException;
 import org.infinispan.util.BidirectionalLinkedHashMap;
@@ -45,79 +46,84 @@ import java.util.Set;
  */
 public class RemoteTransaction extends AbstractCacheTransaction implements Cloneable {
 
-   private static final Log log = LogFactory.getLog(RemoteTransaction.class);
+    private static final Log log = LogFactory.getLog(RemoteTransaction.class);
 
-   private volatile boolean valid = true;
+    private volatile boolean valid = true;
 
-   public RemoteTransaction(WriteCommand[] modifications, GlobalTransaction tx) {
-      this.modifications = modifications == null || modifications.length == 0 ? Collections.<WriteCommand>emptyList() : Arrays.asList(modifications);
-      lookedUpEntries = new BidirectionalLinkedHashMap<Object, CacheEntry>(this.modifications.size());
-      this.tx = tx;
-   }
+    public RemoteTransaction(WriteCommand[] modifications, GlobalTransaction tx) {
+        this.modifications = modifications == null || modifications.length == 0 ? Collections.<WriteCommand>emptyList() : Arrays.asList(modifications);
+        lookedUpEntries = new BidirectionalLinkedHashMap<Object, CacheEntry>(this.modifications.size());
+        this.tx = tx;
+    }
 
-   public RemoteTransaction(GlobalTransaction tx) {
-      this.modifications = new LinkedList<WriteCommand>();
-      lookedUpEntries = new BidirectionalLinkedHashMap<Object, CacheEntry>();
-      this.tx = tx;
-   }
+    public RemoteTransaction(GlobalTransaction tx) {
+        this.modifications = new LinkedList<WriteCommand>();
+        lookedUpEntries = new BidirectionalLinkedHashMap<Object, CacheEntry>();
+        this.tx = tx;
+    }
 
-   public void invalidate() {
-      valid = false;
-   }
+    public void invalidate() {
+        valid = false;
+    }
 
-   public void putLookedUpEntry(Object key, CacheEntry e) {
-      if (valid) {
-         if (log.isTraceEnabled()) {
-            log.tracef("Adding key %s to tx %s", key, getGlobalTransaction());
-         }
-         lookedUpEntries.put(key, e);
-      } else {
-         throw new InvalidTransactionException("This remote transaction " + getGlobalTransaction() + " is invalid");
-      }
-   }
+    public void putLookedUpEntry(Object key, CacheEntry e) {
+        if (valid) {
+            if (log.isTraceEnabled()) {
+                log.tracef("Adding key %s to tx %s", key, getGlobalTransaction());
+            }
+            lookedUpEntries.put(key, e);
+        } else {
+            throw new InvalidTransactionException("This remote transaction " + getGlobalTransaction() + " is invalid");
+        }
+    }
 
-   @Override
-   public boolean equals(Object o) {
-      if (this == o) return true;
-      if (!(o instanceof RemoteTransaction)) return false;
-      RemoteTransaction that = (RemoteTransaction) o;
-      return tx.equals(that.tx);
-   }
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof RemoteTransaction)) return false;
+        RemoteTransaction that = (RemoteTransaction) o;
+        return tx.equals(that.tx);
+    }
 
-   @Override
-   public int hashCode() {
-      return tx.hashCode();
-   }
+    @Override
+    public int hashCode() {
+        return tx.hashCode();
+    }
 
-   @Override
-   @SuppressWarnings("unchecked")
-   public Object clone() {
-      try {
-         RemoteTransaction dolly = (RemoteTransaction) super.clone();
-         dolly.modifications = new ArrayList<WriteCommand>(modifications);
-         dolly.lookedUpEntries = lookedUpEntries.clone();
-         return dolly;
-      } catch (CloneNotSupportedException e) {
-         throw new IllegalStateException("Impossible!!");
-      }
-   }
+    @Override
+    @SuppressWarnings("unchecked")
+    public Object clone() {
+        try {
+            RemoteTransaction dolly = (RemoteTransaction) super.clone();
+            dolly.modifications = new ArrayList<WriteCommand>(modifications);
+            dolly.lookedUpEntries = lookedUpEntries.clone();
+            return dolly;
+        } catch (CloneNotSupportedException e) {
+            throw new IllegalStateException("Impossible!!");
+        }
+    }
 
-   @Override
-   public String toString() {
-      return "RemoteTransaction{" +
-            "modifications=" + modifications +
-            ", lookedUpEntries=" + lookedUpEntries +
-            ", tx=" + tx +
-            '}';
-   }
+    @Override
+    public String toString() {
+        return "RemoteTransaction{" +
+                "modifications=" + modifications +
+                ", lookedUpEntries=" + lookedUpEntries +
+                ", tx=" + tx +
+                '}';
+    }
 
-   public Set<Object> getLockedKeys() {
-      Set<Object> result = new HashSet<Object>();
-      for (Object key : getLookedUpEntries().keySet()) {
-         result.add(key);
-      }
-      if (lookedUpEntries.entrySet().size() != result.size())
-         throw new IllegalStateException("Different sizes!");
-      return result;
-   }
+    public Set<Object> getLockedKeys() {
+        Set<Object> result = new HashSet<Object>();
+        for (Object key : getLookedUpEntries().keySet()) {
+            result.add(key);
+        }
+        if (lookedUpEntries.entrySet().size() != result.size())
+            throw new IllegalStateException("Different sizes!");
+        return result;
+    }
+
+    @Override
+    public void addReadKey(Object key, InternalMVCCEntry ime) {
+        //no-op
+    }
 }

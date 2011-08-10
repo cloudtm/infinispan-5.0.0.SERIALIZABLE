@@ -81,7 +81,7 @@ public class ReadWriteLockManagerImpl implements ReadWriteLockManager {
         }
     }
 
-    protected long getLockAcquisitionTimeout(InvocationContext ctx) {
+    public long getLockAcquisitionTimeout(InvocationContext ctx) {
         return ctx.hasFlag(Flag.ZERO_LOCK_ACQUISITION_TIMEOUT) ?
                 0 : configuration.getLockAcquisitionTimeout();
     }

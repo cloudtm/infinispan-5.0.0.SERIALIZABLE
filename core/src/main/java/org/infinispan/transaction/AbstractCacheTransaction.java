@@ -25,15 +25,14 @@ package org.infinispan.transaction;
 
 import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.container.entries.CacheEntry;
+import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.transaction.xa.CacheTransaction;
 import org.infinispan.transaction.xa.GlobalTransaction;
 import org.infinispan.util.BidirectionalLinkedHashMap;
 import org.infinispan.util.BidirectionalMap;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 /**
  * Base class for local and remote transaction.
@@ -47,51 +46,99 @@ import java.util.Set;
  */
 public abstract class AbstractCacheTransaction implements CacheTransaction {
 
-   protected List<WriteCommand> modifications;
-   protected BidirectionalLinkedHashMap<Object, CacheEntry> lookedUpEntries;
-   protected GlobalTransaction tx;
-   protected Set<Object> affectedKeys = null;
+    protected List<WriteCommand> modifications;
+    protected BidirectionalLinkedHashMap<Object, CacheEntry> lookedUpEntries;
+    protected GlobalTransaction tx;
+    protected Set<Object> affectedKeys = null;
 
-   protected volatile boolean prepared;
+    //changes by Pedro: added a read-set, bit set and version and their manipulation
+    protected Map<Object, InternalMVCCEntry> readSet;
+    protected BitSet alreadyRead;
+    protected VersionVC vectorClock;
 
-   public GlobalTransaction getGlobalTransaction() {
-      return tx;
-   }
+    protected volatile boolean prepared;
 
-   public List<WriteCommand> getModifications() {
-      return modifications;
-   }
+    public GlobalTransaction getGlobalTransaction() {
+        return tx;
+    }
 
-   public void setModifications(WriteCommand[] modifications) {
-      this.modifications = Arrays.asList(modifications);
-   }
+    public List<WriteCommand> getModifications() {
+        return modifications;
+    }
 
-   public BidirectionalMap<Object, CacheEntry> getLookedUpEntries() {
-      return lookedUpEntries;
-   }
+    public void setModifications(WriteCommand[] modifications) {
+        this.modifications = Arrays.asList(modifications);
+    }
 
-   public CacheEntry lookupEntry(Object key) {
-      if (lookedUpEntries == null) return null;
-      return lookedUpEntries.get(key);
-   }
+    public BidirectionalMap<Object, CacheEntry> getLookedUpEntries() {
+        return lookedUpEntries;
+    }
 
-   public void removeLookedUpEntry(Object key) {
-      if (lookedUpEntries != null) lookedUpEntries.remove(key);
-   }
+    public CacheEntry lookupEntry(Object key) {
+        if (lookedUpEntries == null) return null;
+        return lookedUpEntries.get(key);
+    }
 
-   public void clearLookedUpEntries() {
-      if (lookedUpEntries != null) lookedUpEntries.clear();
-   }
+    public void removeLookedUpEntry(Object key) {
+        if (lookedUpEntries != null) lookedUpEntries.remove(key);
+    }
 
-   public void setLookedUpEntries(BidirectionalMap<Object, CacheEntry> lookedUpEntries) {
-      this.lookedUpEntries = new BidirectionalLinkedHashMap<Object, CacheEntry>(lookedUpEntries);
-   }
+    public void clearLookedUpEntries() {
+        if (lookedUpEntries != null) lookedUpEntries.clear();
+    }
 
-   public Set<Object> getAffectedKeys() {
-      return affectedKeys == null ? Collections.emptySet() : affectedKeys;
-   }
+    public void setLookedUpEntries(BidirectionalMap<Object, CacheEntry> lookedUpEntries) {
+        this.lookedUpEntries = new BidirectionalLinkedHashMap<Object, CacheEntry>(lookedUpEntries);
+    }
 
-   public void setAffectedKeys(Set<Object> affectedKeys) {
-      this.affectedKeys = affectedKeys;
-   }
+    public Set<Object> getAffectedKeys() {
+        return affectedKeys == null ? Collections.emptySet() : affectedKeys;
+    }
+
+    public void setAffectedKeys(Set<Object> affectedKeys) {
+        this.affectedKeys = affectedKeys;
+    }
+
+    public void setReadSet(Map<Object, InternalMVCCEntry> readSet) {
+        this.readSet = readSet;
+    }
+
+    public InternalMVCCEntry getReadKey(Object key) {
+        return readSet == null ? null : readSet.get(key);
+    }
+
+    public abstract void addReadKey(Object key, InternalMVCCEntry ime);
+
+    public boolean hasAlreadyReadFrom(int idx) {
+        return alreadyRead != null && alreadyRead.get(idx);
+    }
+
+    public void setAlreadyRead(int idx) {
+        if(alreadyRead == null) {
+            alreadyRead = new BitSet();
+        }
+        alreadyRead.set(idx);
+    }
+
+    public void initVectorClock(VersionVC vc) {
+        vectorClock = vc.copy();
+    }
+
+    public void updateVectorClock(VersionVC other) {
+        vectorClock.setToMaximum(other);
+    }
+
+    public long getValueFrom(int idx) {
+        return vectorClock != null ? vectorClock.get(idx) : VersionVC.EMPTY_POSITION;
+    }
+
+    public VersionVC calculateVectorClockToRead() {
+        VersionVC vc = new VersionVC();
+        for(int i = 0; i < alreadyRead.length(); ++i) {
+            if(alreadyRead.get(i)) {
+                vc.set(i, vectorClock.get(i));
+            }
+        }
+        return vc;
+    }
 }

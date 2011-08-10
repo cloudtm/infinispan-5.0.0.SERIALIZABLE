@@ -44,68 +44,70 @@ import java.util.concurrent.ConcurrentMap;
  */
 public class XaTransactionTable extends TransactionTable {
 
-   private static final Log log = LogFactory.getLog(XaTransactionTable.class);
+    private static final Log log = LogFactory.getLog(XaTransactionTable.class);
 
-   protected final ConcurrentMap<Xid, LocalXaTransaction> xid2LocalTx = new ConcurrentHashMap<Xid, LocalXaTransaction>();
-   private RecoveryManager recoveryManager;
+    protected final ConcurrentMap<Xid, LocalXaTransaction> xid2LocalTx = new ConcurrentHashMap<Xid, LocalXaTransaction>();
+    private RecoveryManager recoveryManager;
 
-   @Inject
-   public void init(RecoveryManager recoveryManager) {
-      this.recoveryManager = recoveryManager;
-   }
+    @Inject
+    public void init(RecoveryManager recoveryManager) {
+        this.recoveryManager = recoveryManager;
+    }
 
-   @Override
-   public boolean removeLocalTransaction(LocalTransaction localTx) {
-      boolean result = false;
-      if (localTx.getTransaction() != null) {//this can be null when we force the invocation during recovery, perhaps on a remote node
-         result = super.removeLocalTransaction(localTx);
-      }
-      LocalXaTransaction xaLocalTransaction = (LocalXaTransaction) localTx;
-      xid2LocalTx.remove(xaLocalTransaction.getXid());
-      return result;
-   }
+    @Override
+    public boolean removeLocalTransaction(LocalTransaction localTx) {
+        boolean result = false;
+        if (localTx.getTransaction() != null) {//this can be null when we force the invocation during recovery, perhaps on a remote node
+            result = super.removeLocalTransaction(localTx);
+        }
+        LocalXaTransaction xaLocalTransaction = (LocalXaTransaction) localTx;
+        xid2LocalTx.remove(xaLocalTransaction.getXid());
+        return result;
+    }
 
-   public LocalXaTransaction getLocalTransaction(Xid xid) {
-      return this.xid2LocalTx.get(xid);
-   }
+    public LocalXaTransaction getLocalTransaction(Xid xid) {
+        return this.xid2LocalTx.get(xid);
+    }
 
-   public void addLocalTransactionMapping(LocalXaTransaction localTransaction) {
-      if (localTransaction.getXid() == null) throw new IllegalStateException("Initialize xid first!");
-      this.xid2LocalTx.put(localTransaction.getXid(), localTransaction);
-   }
+    public void addLocalTransactionMapping(LocalXaTransaction localTransaction) {
+        if (localTransaction.getXid() == null) throw new IllegalStateException("Initialize xid first!");
+        this.xid2LocalTx.put(localTransaction.getXid(), localTransaction);
+    }
 
-   @Override
-   public void enlist(Transaction transaction, LocalTransaction ltx) {
-      LocalXaTransaction localTransaction = (LocalXaTransaction) ltx;
-      if (!localTransaction.isEnlisted()) { //make sure that you only enlist it once
-         try {
-            transaction.enlistResource(new TransactionXaAdapter(localTransaction, this, configuration, recoveryManager, txCoordinator));
-         } catch (Exception e) {
-            Xid xid = localTransaction.getXid();
-            if (xid != null && !localTransaction.getLookedUpEntries().isEmpty()) {
-               log.debug("Attempting a rollback to clear stale resources!");
-               try {
-                  txCoordinator.rollback(localTransaction);
-               } catch (XAException xae) {
-                  log.debug("Caught exception attempting to clean up " + xid, xae);
-               }
+    @Override
+    public void enlist(Transaction transaction, LocalTransaction ltx) {
+        LocalXaTransaction localTransaction = (LocalXaTransaction) ltx;
+        if (!localTransaction.isEnlisted()) { //make sure that you only enlist it once
+            try {
+                transaction.enlistResource(new TransactionXaAdapter(localTransaction, this, configuration, recoveryManager, txCoordinator));
+            } catch (Exception e) {
+                Xid xid = localTransaction.getXid();
+                if (xid != null && !localTransaction.getLookedUpEntries().isEmpty()) {
+                    log.debug("Attempting a rollback to clear stale resources!");
+                    try {
+                        txCoordinator.rollback(localTransaction);
+                    } catch (XAException xae) {
+                        log.debug("Caught exception attempting to clean up " + xid, xae);
+                    }
+                }
+                log.error("Failed to enlist TransactionXaAdapter to transaction", e);
+                throw new CacheException(e);
             }
-            log.error("Failed to enlist TransactionXaAdapter to transaction", e);
-            throw new CacheException(e);
-         }
-      }
-   }
+            //initiates the vector clock for serializability
+            localTransaction.initVectorClock(commitLog.getActualVersion());
+        }
+    }
 
-   public RecoveryManager getRecoveryManager() {
-      return recoveryManager;
-   }
+    public RecoveryManager getRecoveryManager() {
+        return recoveryManager;
+    }
 
-   public void setRecoveryManager(RecoveryManager recoveryManager) {
-      this.recoveryManager = recoveryManager;
-   }
+    public void setRecoveryManager(RecoveryManager recoveryManager) {
+        this.recoveryManager = recoveryManager;
+    }
 
-   @Override
-   public int getLocalTxCount() {
-      return xid2LocalTx.size();
-   }
+    @Override
+    public int getLocalTxCount() {
+        return xid2LocalTx.size();
+    }
 }

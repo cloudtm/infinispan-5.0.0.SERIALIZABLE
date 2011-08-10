@@ -31,6 +31,8 @@ import javax.transaction.Transaction;
 
 import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.context.impl.TxInvocationContext;
+import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.transaction.xa.GlobalTransaction;
 
 /**
@@ -84,5 +86,35 @@ public class TransactionalInvocationContextFlagsOverride extends InvocationConte
    public boolean isTransactionValid() {
       return delegate.isTransactionValid();
    }
+
+    @Override
+    public void addReadKey(Object key, InternalMVCCEntry ime) {
+        delegate.addReadKey(key,ime);
+    }
+
+    @Override
+    public void markReadFrom(int idx) {
+        delegate.markReadFrom(idx);
+    }
+
+    @Override
+    public InternalMVCCEntry getReadKey(Object Key) {
+        return delegate.getReadKey(Key);
+    }
+
+    @Override
+    public VersionVC calculateVersionToRead() {
+        return delegate.calculateVersionToRead();
+    }
+
+    @Override
+    public void updateVectorClock(VersionVC other) {
+        delegate.updateVectorClock(other);
+    }
+
+    @Override
+    public long getVectorClockValueIn(int idx) {
+        return delegate.getVectorClockValueIn(idx);
+    }
 
 }

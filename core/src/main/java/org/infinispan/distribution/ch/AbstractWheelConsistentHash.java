@@ -248,7 +248,7 @@ public abstract class AbstractWheelConsistentHash extends AbstractConsistentHash
     @Override
     public ReplGroup getGroupFor(Object key, int replCount) {
         List<Address> addrs = locate(key, replCount);
-        List<Address> candidates = new LinkedList<Address>(getRealAddresses(caches));
+        List<Address> candidates = new LinkedList<Address>(getRealAddresses(new HashSet(positions.values())));
         long id = candidates.indexOf(addrs.get(0));
         return new ReplGroup(id, addrs);
     }

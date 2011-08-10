@@ -24,6 +24,8 @@ package org.infinispan.context.impl;
 
 import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.container.entries.CacheEntry;
+import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.transaction.AbstractCacheTransaction;
 import org.infinispan.transaction.LocalTransaction;
@@ -46,83 +48,113 @@ import java.util.Map;
  */
 public class LocalTxInvocationContext extends AbstractTxInvocationContext {
 
-   private LocalTransaction localTransaction;
+    private LocalTransaction localTransaction;
 
-   public boolean isTransactionValid() {
-      Transaction t = getTransaction();
-      int status = -1;
-      if (t != null) {
-         try {
-            status = t.getStatus();
-         } catch (SystemException e) {
-            // no op
-         }
-      }
-      return status == Status.STATUS_ACTIVE || status == Status.STATUS_PREPARING;
-   }
+    public boolean isTransactionValid() {
+        Transaction t = getTransaction();
+        int status = -1;
+        if (t != null) {
+            try {
+                status = t.getStatus();
+            } catch (SystemException e) {
+                // no op
+            }
+        }
+        return status == Status.STATUS_ACTIVE || status == Status.STATUS_PREPARING;
+    }
 
-   public boolean isOriginLocal() {
-      return true;
-   }
+    public boolean isOriginLocal() {
+        return true;
+    }
 
-   public Object getLockOwner() {
-      return localTransaction.getGlobalTransaction();
-   }
+    public Object getLockOwner() {
+        return localTransaction.getGlobalTransaction();
+    }
 
-   public GlobalTransaction getGlobalTransaction() {
-      return localTransaction.getGlobalTransaction();
-   }
+    public GlobalTransaction getGlobalTransaction() {
+        return localTransaction.getGlobalTransaction();
+    }
 
-   public List<WriteCommand> getModifications() {
-      return localTransaction == null ? null : localTransaction.getModifications();
-   }
+    public List<WriteCommand> getModifications() {
+        return localTransaction == null ? null : localTransaction.getModifications();
+    }
 
-   public void setLocalTransaction(LocalTransaction localTransaction) {
-      this.localTransaction = localTransaction;
-   }
+    public void setLocalTransaction(LocalTransaction localTransaction) {
+        this.localTransaction = localTransaction;
+    }
 
-   public CacheEntry lookupEntry(Object key) {
-      return localTransaction != null ? localTransaction.lookupEntry(key) : null;
-   }
+    public CacheEntry lookupEntry(Object key) {
+        return localTransaction != null ? localTransaction.lookupEntry(key) : null;
+    }
 
-   public BidirectionalMap<Object, CacheEntry> getLookedUpEntries() {
-      return localTransaction.getLookedUpEntries();
-   }
+    public BidirectionalMap<Object, CacheEntry> getLookedUpEntries() {
+        return localTransaction.getLookedUpEntries();
+    }
 
-   public void putLookedUpEntry(Object key, CacheEntry e) {
-      localTransaction.putLookedUpEntry(key, e);
-   }
+    public void putLookedUpEntry(Object key, CacheEntry e) {
+        localTransaction.putLookedUpEntry(key, e);
+    }
 
-   public void putLookedUpEntries(Map<Object, CacheEntry> lookedUpEntries) {
-      for (Map.Entry<Object, CacheEntry> ce : lookedUpEntries.entrySet()) {
-         localTransaction.putLookedUpEntry(ce.getKey(), ce.getValue());
-      }
-   }
+    public void putLookedUpEntries(Map<Object, CacheEntry> lookedUpEntries) {
+        for (Map.Entry<Object, CacheEntry> ce : lookedUpEntries.entrySet()) {
+            localTransaction.putLookedUpEntry(ce.getKey(), ce.getValue());
+        }
+    }
 
-   public void removeLookedUpEntry(Object key) {
-      localTransaction.removeLookedUpEntry(key);
-   }
+    public void removeLookedUpEntry(Object key) {
+        localTransaction.removeLookedUpEntry(key);
+    }
 
-   public void clearLookedUpEntries() {
-      localTransaction.clearLookedUpEntries();
-   }
+    public void clearLookedUpEntries() {
+        localTransaction.clearLookedUpEntries();
+    }
 
-   @Override
-   public boolean hasLockedKey(Object key) {
-      return localTransaction != null && super.hasLockedKey(key);
-   }
+    @Override
+    public boolean hasLockedKey(Object key) {
+        return localTransaction != null && super.hasLockedKey(key);
+    }
 
-   public void remoteLocksAcquired(Collection<Address> nodes) {
-      localTransaction.locksAcquired(nodes);
-   }
+    public void remoteLocksAcquired(Collection<Address> nodes) {
+        localTransaction.locksAcquired(nodes);
+    }
 
-   public Collection<Address> getRemoteLocksAcquired() {
-      return localTransaction.getRemoteLocksAcquired();
-   }
+    public Collection<Address> getRemoteLocksAcquired() {
+        return localTransaction.getRemoteLocksAcquired();
+    }
 
-   @Override
-   public AbstractCacheTransaction getCacheTrasaction() {
-      return localTransaction;
-   }
+    @Override
+    public AbstractCacheTransaction getCacheTransaction() {
+        return localTransaction;
+    }
 
+    //version state
+    @Override
+    public VersionVC calculateVersionToRead() {
+        return localTransaction.calculateVectorClockToRead();
+    }
+
+    @Override
+    public void updateVectorClock(VersionVC other) {
+        localTransaction.updateVectorClock(other);
+    }
+
+    @Override
+    public long getVectorClockValueIn(int idx) {
+        return localTransaction.getValueFrom(idx);
+    }
+
+     @Override
+    public void addReadKey(Object key, InternalMVCCEntry ime) {
+        localTransaction.addReadKey(key, ime);
+    }
+
+    @Override
+    public void markReadFrom(int idx) {
+        localTransaction.setAlreadyRead(idx);
+    }
+
+    @Override
+    public InternalMVCCEntry getReadKey(Object Key) {
+        return localTransaction.getReadKey(Key);
+    }
 }

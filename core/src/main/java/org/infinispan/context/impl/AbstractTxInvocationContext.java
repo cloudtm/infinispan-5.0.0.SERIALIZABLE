@@ -46,17 +46,17 @@ public abstract class AbstractTxInvocationContext extends AbstractInvocationCont
    }
 
    public Set<Object> getAffectedKeys() {
-      return getCacheTrasaction().getAffectedKeys();
+      return getCacheTransaction().getAffectedKeys();
    }
 
    public void addAffectedKeys(Collection<Object> keys) {
       if (keys != null && !keys.isEmpty()) {
-         Set<Object> affectedKeys = getCacheTrasaction().getAffectedKeys();
+         Set<Object> affectedKeys = getCacheTransaction().getAffectedKeys();
          if (affectedKeys == null || affectedKeys.isEmpty()) {
             affectedKeys = new HashSet<Object>();
          }
          affectedKeys.addAll(keys);
-         getCacheTrasaction().setAffectedKeys(affectedKeys);
+         getCacheTransaction().setAffectedKeys(affectedKeys);
       }
    }
 
@@ -73,6 +73,6 @@ public abstract class AbstractTxInvocationContext extends AbstractInvocationCont
       return transaction;
    }
 
-   public abstract AbstractCacheTransaction getCacheTrasaction();
+   public abstract AbstractCacheTransaction getCacheTransaction();
 
 }

@@ -1,5 +1,6 @@
 package org.infinispan.util.concurrent.locks.readwritelock;
 
+import org.infinispan.context.Flag;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.util.concurrent.locks.LockManager;
 
@@ -27,4 +28,11 @@ public interface ReadWriteLockManager extends LockManager {
      * @param key key to unlock
      */
     void sharedUnlock(Object key);
+
+    /**
+     * return the lock acquisition timeout for the given context
+     * @param ctx the context
+     * @return the lock acquisition timeout
+     */
+    long getLockAcquisitionTimeout(InvocationContext ctx);
 }
