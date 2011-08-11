@@ -1,5 +1,6 @@
 package org.infinispan.container;
 
+import org.infinispan.Version;
 import org.infinispan.container.entries.InternalCacheEntry;
 import org.infinispan.container.entries.InternalEntryFactory;
 import org.infinispan.factories.annotations.Inject;
@@ -254,6 +255,17 @@ public class MultiVersionDataContainer implements DataContainer {
 
     public void addNewCommittedTransaction(VersionVC newVersion) {
         commitLog.addNewVersion(newVersion);
+    }
+
+    @Override
+    public boolean validateKey(Object key, int idx, long value) {
+        VBox actual = entries.get(key);
+        if(actual == null) {
+            return true;
+        }
+        long actualValue = actual.getVersion().get(idx);
+
+        return actualValue <= value;
     }
 
     /**

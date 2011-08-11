@@ -85,4 +85,7 @@ public interface Visitor {
     Object visitTotalOrderPrepareCommand(TxInvocationContext ctx, TotalOrderPrepareCommand command) throws Throwable;
 
     Object visitVoteCommand(TxInvocationContext ctx, VoteCommand command) throws Throwable;
+
+    //serializable in commit phase
+    Object visitAcquireValidationLocksCommand(TxInvocationContext ctx, AcquireValidationLocksCommand command) throws Throwable;
 }

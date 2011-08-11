@@ -46,6 +46,7 @@ import org.infinispan.factories.annotations.Inject;
 import org.infinispan.factories.annotations.Start;
 import org.infinispan.interceptors.base.CommandInterceptor;
 import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.remoting.transport.Transport;
 import org.infinispan.transaction.xa.GlobalTransaction;
@@ -53,6 +54,7 @@ import org.infinispan.util.ReversibleOrderedSet;
 import org.infinispan.util.concurrent.IsolationLevel;
 import org.infinispan.util.concurrent.TimeoutException;
 import org.infinispan.util.concurrent.locks.LockManager;
+import org.infinispan.util.concurrent.locks.readwritelock.ReadWriteLockManager;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -71,7 +73,7 @@ public class LockingInterceptor extends CommandInterceptor {
     LockManager lockManager;
     DataContainer dataContainer;
     EntryFactory entryFactory;
-    boolean useReadCommitted;
+    boolean useReadCommitted, useSerializable;
     Transport transport;
 
     @Inject
@@ -85,6 +87,7 @@ public class LockingInterceptor extends CommandInterceptor {
     @Start
     private void determineIsolationLevel() {
         useReadCommitted = configuration.getIsolationLevel() == IsolationLevel.READ_COMMITTED;
+        useSerializable = configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE;
     }
 
     @Override
@@ -133,6 +136,28 @@ public class LockingInterceptor extends CommandInterceptor {
         } finally {
             if (command.isOnePhaseCommit())
                 cleanupLocks(ctx, true);
+        }
+    }
+
+    @Override
+    public Object visitAcquireValidationLocksCommand(TxInvocationContext ctx, AcquireValidationLocksCommand command) throws Throwable {
+        ReadWriteLockManager rwlman = (ReadWriteLockManager) lockManager;
+        try {
+            for(Object k : command.getWriteSet()) {
+                rwlman.lockAndRecord(k, ctx);
+                ctx.putLookedUpEntry(k, null); //to release later
+            }
+
+            for(Object k : command.getReadSet()) {
+                rwlman.sharedLockAndRecord(k, ctx);
+                ctx.putLookedUpEntry(k, null); //same reason above (release later)
+                validateKey(k, command.getVersion());
+            }
+
+            return super.visitAcquireValidationLocksCommand(ctx, command);    //To change body of overridden methods use File | Settings | File Templates.
+        } catch(Throwable t) {
+            rwlman.unlock(ctx);
+            throw t;
         }
     }
 
@@ -378,10 +403,13 @@ public class LockingInterceptor extends CommandInterceptor {
                 }
 
                 // and then unlock
-                if (needToUnlock && !ctx.hasFlag(Flag.SKIP_LOCKING)) {
+                if (needToUnlock && !ctx.hasFlag(Flag.SKIP_LOCKING) && !useSerializable) {
                     if (trace) log.tracef("Releasing lock on [%s] for owner %s", key, owner);
                     lockManager.unlock(key);
                 }
+            }
+            if(useSerializable) {
+                lockManager.unlock(ctx); //this not call the entry.rollback() (instead of releaseLocks(ctx))
             }
         } else {
             lockManager.releaseLocks(ctx);
@@ -430,6 +458,12 @@ public class LockingInterceptor extends CommandInterceptor {
                 if (trace) log.tracef("Releasing lock on [%s] for owner %s", key, owner);
                 lockManager.unlock(key);
             }
+        }
+    }
+
+    protected void validateKey(Object key, VersionVC toCompare) {
+        if(!dataContainer.validateKey(key, 0, toCompare.get(0))) {
+            throw new CacheException("validation of key [" + key + "] failed!");
         }
     }
 }

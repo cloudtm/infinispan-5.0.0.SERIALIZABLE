@@ -107,6 +107,10 @@ public abstract class AbstractCacheTransaction implements CacheTransaction {
         return readSet == null ? null : readSet.get(key);
     }
 
+    public Set<Object> getReadSet() {
+        return readSet != null ? Collections.unmodifiableSet(readSet.keySet()) : Collections.emptySet();
+    }
+
     public abstract void addReadKey(Object key, InternalMVCCEntry ime);
 
     public boolean hasAlreadyReadFrom(int idx) {

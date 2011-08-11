@@ -65,7 +65,7 @@ public class TransactionCoordinator {
     private Configuration configuration;
     private RpcManager rpcManager;
     private boolean RRwithWriteSkew;
-    private boolean isTotalOrderReplication;
+    private boolean isTotalOrderReplication, useSerializable;
 
     boolean trace;
 
@@ -81,6 +81,7 @@ public class TransactionCoordinator {
         this.rpcManager = rpcManager;
         RRwithWriteSkew = configuration.isWriteSkewCheck() && configuration.getIsolationLevel() == IsolationLevel.REPEATABLE_READ;
         isTotalOrderReplication = configuration.isTotalOrderReplication();
+        useSerializable = configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE;
     }
 
     public int prepare(LocalTransaction localTransaction) throws XAException {
@@ -91,9 +92,14 @@ public class TransactionCoordinator {
             return XA_OK;
         }
 
-        if(isTotalOrderReplication && (!RRwithWriteSkew || !remoteWriteSkewNeeded(localTransaction))) {
+        if(isTotalOrderReplication &&
+                (!RRwithWriteSkew || !remoteWriteSkewNeeded(localTransaction)) &&
+                !useSerializable) {
             return XA_OK; //it is read committed in total order scheme... one phase needed
         }
+
+        LocalTxInvocationContext ctx = icc.createTxInvocationContext();
+        ctx.setLocalTransaction(localTransaction);
 
         PrepareCommand prepareCommand;
         if(isTotalOrderReplication) {
@@ -101,12 +107,16 @@ public class TransactionCoordinator {
             tOPrepareCommand.setOnePhaseCommit(false); //we need a vote phase!
             prepareCommand = tOPrepareCommand;
         } else {
-            prepareCommand = commandsFactory.buildPrepareCommand(localTransaction.getGlobalTransaction(), localTransaction.getModifications(), configuration.isOnePhaseCommit());
+            if(useSerializable) {
+                prepareCommand = commandsFactory.buildPrepareCommand(localTransaction.getGlobalTransaction(),
+                        localTransaction.getModifications(), localTransaction.getReadSet(),
+                        ctx.calculateVersionToRead(), configuration.isOnePhaseCommit());
+            } else {
+                prepareCommand = commandsFactory.buildPrepareCommand(localTransaction.getGlobalTransaction(), localTransaction.getModifications(), configuration.isOnePhaseCommit());
+            }
         }
         if (trace) log.tracef("Sending prepare command through the chain: %s", prepareCommand);
 
-        LocalTxInvocationContext ctx = icc.createTxInvocationContext();
-        ctx.setLocalTransaction(localTransaction);
         try {
             invoker.invoke(ctx, prepareCommand);
             if (localTransaction.isReadOnly()) {

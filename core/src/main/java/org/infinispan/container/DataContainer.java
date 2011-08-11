@@ -223,4 +223,13 @@ public interface DataContainer extends Iterable<InternalCacheEntry> {
      * @param version the new version of the values deleted
      */
     void purgeExpired(VersionVC version);
+
+    /**
+     * TODO
+     * @param key
+     * @param idx
+     * @param value
+     * @return
+     */
+    boolean validateKey(Object key, int idx, long value);
 }

@@ -157,4 +157,9 @@ public abstract class AbstractVisitor implements Visitor {
     public Object visitVoteCommand(TxInvocationContext ctx, VoteCommand command) throws Throwable {
         return handleDefault(ctx, command);
     }
+
+    @Override
+    public Object visitAcquireValidationLocksCommand(TxInvocationContext ctx, AcquireValidationLocksCommand command) throws Throwable {
+        return handleDefault(ctx, command);
+    }
 }

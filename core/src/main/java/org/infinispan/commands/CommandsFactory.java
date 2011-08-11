@@ -42,6 +42,7 @@ import org.infinispan.distexec.mapreduce.Reducer;
 import org.infinispan.distribution.ch.ConsistentHash;
 import org.infinispan.factories.scopes.Scope;
 import org.infinispan.factories.scopes.Scopes;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.transaction.xa.GlobalTransaction;
 
@@ -334,5 +335,9 @@ public interface CommandsFactory {
      */
     VoteCommand buildVoteCommand(GlobalTransaction gtx, boolean success, Set<Object> keys);
 
+    AcquireValidationLocksCommand buildAcquireValidationLocksCommand(Set<Object> readSet, Set<Object> writeSet, VersionVC version);
 
+    PrepareCommand buildPrepareCommand(GlobalTransaction gtx, List<WriteCommand> modifications,
+                                              Set<Object> readSet, VersionVC version,
+                                              boolean onePhaseCommit);
 }

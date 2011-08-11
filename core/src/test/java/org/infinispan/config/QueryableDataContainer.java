@@ -197,4 +197,10 @@ public class QueryableDataContainer implements DataContainer {
         loggedOperations.add("purgeExpired(" + version + ")" );
         delegate.purgeExpired(version);
     }
+
+    @Override
+    public boolean validateKey(Object key, int idx, long value) {
+        loggedOperations.add("validateKey(" + key + "," + idx + "," + value + ")" );
+        return delegate.validateKey(key, idx, value);
+    }
 }

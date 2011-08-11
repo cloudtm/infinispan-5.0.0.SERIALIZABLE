@@ -9,6 +9,8 @@ import java.util.Map;
  */
 public class VersionVC {
     public static final long EMPTY_POSITION = -1;
+    public static final VersionVC EMPTY_VERSION = new VersionVC();
+
 
     private Map<Object,Long> vectorClock;
 

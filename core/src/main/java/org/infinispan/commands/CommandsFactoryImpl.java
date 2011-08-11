@@ -51,6 +51,7 @@ import org.infinispan.factories.annotations.ComponentName;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.factories.annotations.Start;
 import org.infinispan.interceptors.InterceptorChain;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.notifications.cachelistener.CacheNotifier;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.transaction.RemoteTransaction;
@@ -193,6 +194,14 @@ public class CommandsFactoryImpl implements CommandsFactory {
 
     public PrepareCommand buildPrepareCommand(GlobalTransaction gtx, List<WriteCommand> modifications, boolean onePhaseCommit) {
         PrepareCommand command = new PrepareCommand(gtx, modifications, onePhaseCommit);
+        command.setCacheName(cacheName);
+        return command;
+    }
+
+    public PrepareCommand buildPrepareCommand(GlobalTransaction gtx, List<WriteCommand> modifications,
+                                              Set<Object> readSet, VersionVC version,
+                                              boolean onePhaseCommit) {
+        PrepareCommand command = new PrepareCommand(gtx, onePhaseCommit, readSet, version, modifications);
         command.setCacheName(cacheName);
         return command;
     }
@@ -436,5 +445,10 @@ public class CommandsFactoryImpl implements CommandsFactory {
         VoteCommand command = new VoteCommand(gtx, success, keys);
         command.setCacheName(cacheName);
         return command;
+    }
+
+    @Override
+    public AcquireValidationLocksCommand buildAcquireValidationLocksCommand(Set<Object> readSet, Set<Object> writeSet, VersionVC version) {
+        return new AcquireValidationLocksCommand(readSet,writeSet, version);
     }
 }

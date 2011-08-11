@@ -356,4 +356,9 @@ public class DefaultDataContainer implements DataContainer {
     public void purgeExpired(VersionVC version) {
         throw new UnsupportedOperationException("bla?");
     }
+
+    @Override
+    public boolean validateKey(Object key, int idx, long value) {
+        throw new UnsupportedOperationException("bla?");
+    }
 }
