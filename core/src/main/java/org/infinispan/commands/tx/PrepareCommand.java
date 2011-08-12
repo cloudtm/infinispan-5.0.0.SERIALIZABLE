@@ -157,13 +157,14 @@ public class PrepareCommand extends AbstractTransactionBoundaryCommand {
     @Override
     public Object[] getParameters() {
         int numMods = modifications == null ? 0 : modifications.length;
-        Object[] retval = new Object[numMods + 4];
+        Object[] retval = new Object[numMods + 6];
         retval[0] = globalTx;
         retval[1] = cacheName;
         retval[2] = onePhaseCommit;
         retval[3] = readSet;
-        retval[4] = numMods;
-        if (numMods > 0) System.arraycopy(modifications, 0, retval, 5, numMods);
+        retval[4] = version;
+        retval[6] = numMods;
+        if (numMods > 0) System.arraycopy(modifications, 0, retval, 6, numMods);
         return retval;
     }
 
@@ -174,10 +175,11 @@ public class PrepareCommand extends AbstractTransactionBoundaryCommand {
         cacheName = (String) args[1];
         onePhaseCommit = (Boolean) args[2];
         readSet = (Set<Object>) args[3];
-        int numMods = (Integer) args[4];
+        version = (VersionVC) args[4];
+        int numMods = (Integer) args[5];
         if (numMods > 0) {
             modifications = new WriteCommand[numMods];
-            System.arraycopy(args, 5, modifications, 0, numMods);
+            System.arraycopy(args, 6, modifications, 0, numMods);
         }
     }
 
@@ -187,6 +189,7 @@ public class PrepareCommand extends AbstractTransactionBoundaryCommand {
         copy.modifications = modifications == null ? null : modifications.clone();
         copy.onePhaseCommit = onePhaseCommit;
         copy.readSet = readSet != null ? new HashSet<Object>(readSet) : null;
+        copy.version = version != null ? version.copy() : null;
         return copy;
     }
 

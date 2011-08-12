@@ -23,10 +23,14 @@
 package org.infinispan.commands.tx;
 
 import org.infinispan.commands.Visitor;
+import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.context.impl.RemoteTxInvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.transaction.xa.GlobalTransaction;
+
+import java.util.Set;
 
 /**
  * Command corresponding to the 2nd phase of 2PC.
@@ -45,8 +49,15 @@ public class CommitCommand extends AbstractTransactionBoundaryCommand {
      */
     public static final byte RESEND_PREPARE = 1;
 
+    private VersionVC commitVersion;
+
     public CommitCommand(GlobalTransaction gtx) {
         this.globalTx = gtx;
+    }
+
+    public CommitCommand(GlobalTransaction gtx, VersionVC commitVersion) {
+        this.globalTx = gtx;
+        this.commitVersion = commitVersion;
     }
 
     public CommitCommand() {
@@ -84,5 +95,25 @@ public class CommitCommand extends AbstractTransactionBoundaryCommand {
         globalTx.setRemote(true);
         RemoteTxInvocationContext ctxt = icc.createRemoteTxInvocationContext(getOrigin());
         return invoker.invoke(ctxt, this);
+    }
+
+    public VersionVC getCommitVersion() {
+        return commitVersion;
+    }
+
+    @Override
+    public Object[] getParameters() {
+        Object[] retval = new Object[3];
+        retval[0] = globalTx;
+        retval[1] = cacheName;
+        retval[2] = commitVersion;
+        return retval;
+    }
+
+    @Override
+    public void setParameters(int commandId, Object[] args) {
+        globalTx = (GlobalTransaction) args[0];
+        cacheName = (String) args[1];
+        commitVersion = (VersionVC) args[2];
     }
 }

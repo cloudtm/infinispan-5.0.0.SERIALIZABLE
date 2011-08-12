@@ -6,6 +6,7 @@ import org.infinispan.commands.Visitor;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.transaction.xa.GlobalTransaction;
 
 import java.util.Collections;
 import java.util.Set;
@@ -19,11 +20,13 @@ public class AcquireValidationLocksCommand implements VisitableCommand, LocalCom
     private Set<Object> writeSet;
     private Set<Object> readSet;
     private VersionVC version;
+    private GlobalTransaction gtx;
 
-    public AcquireValidationLocksCommand(Set<Object> readSet, Set<Object> writeSet, VersionVC version) {
+    public AcquireValidationLocksCommand(GlobalTransaction gtx, Set<Object> readSet, Set<Object> writeSet, VersionVC version) {
         this.writeSet = writeSet;
         this.readSet = readSet;
         this.version = version;
+        this.gtx = gtx;
     }
 
     public Set<Object> getWriteSet() {
@@ -36,6 +39,10 @@ public class AcquireValidationLocksCommand implements VisitableCommand, LocalCom
 
     public VersionVC getVersion() {
         return version;
+    }
+
+    public GlobalTransaction getGlobalTransaction() {
+        return gtx;
     }
 
     @Override

@@ -4,6 +4,7 @@ import org.infinispan.util.concurrent.locks.containers.LockContainer;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
 
 /**
  * @author pedro
@@ -33,4 +34,8 @@ public interface ReadWriteLockContainer extends LockContainer {
      * @param key object in wich the read lock is unlock
      */
     void releaseSharedLock(Object key);
+
+    void clear();
+
+    ReadWriteLock getReadWriteLock(Object key);
 }

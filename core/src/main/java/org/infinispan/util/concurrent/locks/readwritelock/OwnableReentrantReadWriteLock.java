@@ -1,4 +1,4 @@
-package org.infinispan.util.concurrent.locks.containers.readwritelock;
+package org.infinispan.util.concurrent.locks.readwritelock;
 
 import org.infinispan.context.InvocationContextContainer;
 
@@ -175,7 +175,7 @@ public class OwnableReentrantReadWriteLock implements ReadWriteLock {
         public void unlock() {
             Object requestor = icc.getInvocationContext().getLockOwner();
             synchronized (mutex) {
-                if(!writer.equals(requestor)) {
+                if(writer == null || !writer.equals(requestor)) {
                     return ;// throw new IllegalMonitorStateException() //pshiiuuu!!
                 }
                 if(--writeAccesses == 0) {

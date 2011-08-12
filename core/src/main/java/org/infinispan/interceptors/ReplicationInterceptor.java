@@ -22,7 +22,6 @@
  */
 package org.infinispan.interceptors;
 
-import org.infinispan.commands.read.GetKeyValueCommand;
 import org.infinispan.commands.tx.CommitCommand;
 import org.infinispan.commands.tx.PrepareCommand;
 import org.infinispan.commands.tx.RollbackCommand;
@@ -82,15 +81,6 @@ public class ReplicationInterceptor extends BaseRpcInterceptor {
             rpcManager.broadcastRpcCommand(command, configuration.isSyncRollbackPhase(), true);
         }
         return invokeNextInterceptor(ctx, command);
-    }
-
-    @Override
-    public Object visitGetKeyValueCommand(InvocationContext ctx, GetKeyValueCommand command) throws Throwable {
-        if(ctx.isInTxScope()) {
-            //ensures that in full replication the vector clock is updated!
-            ((TxInvocationContext) ctx).markReadFrom(0);
-        }
-        return super.visitGetKeyValueCommand(ctx, command);
     }
 
     @Override

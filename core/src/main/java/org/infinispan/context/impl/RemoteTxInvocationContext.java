@@ -162,4 +162,8 @@ public class RemoteTxInvocationContext extends AbstractTxInvocationContext {
         return VersionVC.EMPTY_POSITION;
     }
 
+    @Override
+    public void setCommitVersion(VersionVC version) {
+        //no-op
+    }
 }

@@ -94,4 +94,6 @@ public interface TxInvocationContext extends InvocationContext {
     void updateVectorClock(VersionVC other);
 
     long getVectorClockValueIn(int idx);
+
+    void setCommitVersion(VersionVC version);
 }

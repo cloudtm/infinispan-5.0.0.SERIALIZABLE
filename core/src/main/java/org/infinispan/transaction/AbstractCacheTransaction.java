@@ -53,7 +53,7 @@ public abstract class AbstractCacheTransaction implements CacheTransaction {
 
     //changes by Pedro: added a read-set, bit set and version and their manipulation
     protected Map<Object, InternalMVCCEntry> readSet;
-    protected BitSet alreadyRead;
+    protected BitSet alreadyRead = new BitSet();
     protected VersionVC vectorClock;
 
     protected volatile boolean prepared;
@@ -118,9 +118,6 @@ public abstract class AbstractCacheTransaction implements CacheTransaction {
     }
 
     public void setAlreadyRead(int idx) {
-        if(alreadyRead == null) {
-            alreadyRead = new BitSet();
-        }
         alreadyRead.set(idx);
     }
 

@@ -2,6 +2,7 @@ package org.infinispan.util.concurrent.locks.containers.readwritelock;
 
 import java.util.Arrays;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
@@ -67,5 +68,15 @@ public class ReentrantStripedReadWriteLockContainer extends AbstractStripedReadW
         return "ReentrantStripedReadWriteLockContainer{" +
                 "sharedLocks=" + (sharedLocks == null ? null : Arrays.asList(sharedLocks)) +
                 '}';
+    }
+
+    @Override
+    public void clear() {
+        sharedLocks = null;
+    }
+
+    @Override
+    public ReadWriteLock getReadWriteLock(Object key) {
+        return sharedLocks[hashToIndex(key)];
     }
 }

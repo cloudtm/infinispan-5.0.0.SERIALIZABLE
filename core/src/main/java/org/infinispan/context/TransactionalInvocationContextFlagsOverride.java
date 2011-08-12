@@ -117,4 +117,9 @@ public class TransactionalInvocationContextFlagsOverride extends InvocationConte
         return delegate.getVectorClockValueIn(idx);
     }
 
+    @Override
+    public void setCommitVersion(VersionVC version) {
+        delegate.setCommitVersion(version);
+    }
+
 }

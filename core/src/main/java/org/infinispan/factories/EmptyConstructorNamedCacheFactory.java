@@ -25,6 +25,7 @@ package org.infinispan.factories;
 
 import org.infinispan.batch.BatchContainer;
 import org.infinispan.commands.CommandsFactory;
+import org.infinispan.container.MultiVersionEntryFactoryImpl;
 import org.infinispan.context.InvocationContextContainer;
 import org.infinispan.eviction.EvictionManager;
 import org.infinispan.eviction.PassivationManager;
@@ -37,6 +38,7 @@ import org.infinispan.transaction.TransactionCoordinator;
 import org.infinispan.transaction.TransactionLog;
 import org.infinispan.container.EntryFactory;
 import org.infinispan.transaction.xa.recovery.RecoveryAdminOperations;
+import org.infinispan.util.concurrent.IsolationLevel;
 
 import static org.infinispan.util.Util.getInstance;
 import static org.infinispan.util.Util.loadClass;
@@ -61,7 +63,11 @@ public class EmptyConstructorNamedCacheFactory extends AbstractNamedCacheCompone
          if (componentType.equals(StreamingMarshaller.class)) {
             VersionAwareMarshaller versionAwareMarshaller = getInstance(VersionAwareMarshaller.class);
             return componentType.cast(versionAwareMarshaller);
-         } else {
+         } if (componentType.equals(EntryFactory.class) &&
+                  configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
+              return (T) new MultiVersionEntryFactoryImpl();
+
+          } else {
             // add an "Impl" to the end of the class name and try again
             componentImpl = loadClass(componentType.getName() + "Impl", Thread.currentThread().getContextClassLoader());
          }

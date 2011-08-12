@@ -50,4 +50,12 @@ public class VBox {
         cp.setToMaximum(previous.version);
         version = cp;
     }
+
+    public String getVBoxChain() {
+        return new StringBuilder("VBox{")
+                .append("version=").append(version)
+                .append("value=").append(value).append("};")
+                .append(previous != null ? previous.getVBoxChain() : "null")
+                .toString();
+    }
 }

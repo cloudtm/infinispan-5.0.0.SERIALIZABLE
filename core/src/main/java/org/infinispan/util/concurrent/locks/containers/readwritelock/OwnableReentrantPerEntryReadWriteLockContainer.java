@@ -1,6 +1,7 @@
 package org.infinispan.util.concurrent.locks.containers.readwritelock;
 
 import org.infinispan.context.InvocationContextContainer;
+import org.infinispan.util.concurrent.locks.readwritelock.OwnableReentrantReadWriteLock;
 
 import java.util.concurrent.locks.ReadWriteLock;
 

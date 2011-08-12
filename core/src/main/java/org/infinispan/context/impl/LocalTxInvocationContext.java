@@ -157,4 +157,9 @@ public class LocalTxInvocationContext extends AbstractTxInvocationContext {
     public InternalMVCCEntry getReadKey(Object Key) {
         return localTransaction.getReadKey(Key);
     }
+
+    @Override
+    public void setCommitVersion(VersionVC version) {
+        localTransaction.setCommitVersion(version);
+    }
 }

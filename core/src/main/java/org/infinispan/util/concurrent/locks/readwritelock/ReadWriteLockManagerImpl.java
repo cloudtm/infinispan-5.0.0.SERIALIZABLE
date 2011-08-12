@@ -8,6 +8,7 @@ import org.infinispan.context.InvocationContextContainer;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.factories.annotations.Start;
+import org.infinispan.factories.annotations.Stop;
 import org.infinispan.jmx.annotations.MBean;
 import org.infinispan.jmx.annotations.ManagedAttribute;
 import org.infinispan.transaction.xa.GlobalTransaction;
@@ -24,6 +25,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -79,6 +81,20 @@ public class ReadWriteLockManagerImpl implements ReadWriteLockManager {
                 this.remoteRemoteContentions.incrementAndGet();
             }
         }
+    }
+
+    @Stop
+    public void stop() {
+        lockContainer.clear();
+
+    }
+
+    @Start
+    public void start() {
+        localLocalContentions.set(0);
+        localRemoteContentions.set(0);
+        remoteLocalContentions.set(0);
+        remoteRemoteContentions.set(0);
     }
 
     public long getLockAcquisitionTimeout(InvocationContext ctx) {
@@ -195,7 +211,7 @@ public class ReadWriteLockManagerImpl implements ReadWriteLockManager {
     @Override
     public Object getOwner(Object key) {
         if (lockContainer.isLocked(key)) {
-            Lock l = lockContainer.getLock(key);
+            ReadWriteLock l = lockContainer.getReadWriteLock(key);
 
             if (l instanceof OwnableReentrantReadWriteLock) {
                 return ((OwnableReentrantReadWriteLock) l).getOwner();

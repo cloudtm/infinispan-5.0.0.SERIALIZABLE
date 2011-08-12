@@ -1,9 +1,11 @@
 package org.infinispan.util.concurrent.locks.containers.readwritelock;
 
 import org.infinispan.context.InvocationContextContainer;
+import org.infinispan.util.concurrent.locks.readwritelock.OwnableReentrantReadWriteLock;
 
 import java.util.Arrays;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
 
 /**
  * @author pedro
@@ -69,5 +71,15 @@ public class OwnableReentrantStripedReadWriteLockContainer extends AbstractStrip
         return "OwnableReentrantStripedReadWriteLockContainer{" +
                 "sharedLocks=" + (sharedLocks == null ? null : Arrays.asList(sharedLocks)) +
                 '}';
+    }
+
+    @Override
+    public void clear() {
+        sharedLocks = null;
+    }
+
+    @Override
+    public ReadWriteLock getReadWriteLock(Object key) {
+        return sharedLocks[hashToIndex(key)];
     }
 }

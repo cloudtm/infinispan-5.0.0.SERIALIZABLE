@@ -115,4 +115,14 @@ public abstract class AbstractPerEntryReadWriteLockContainer implements ReadWrit
             l.readLock().unlock();
         }
     }
+
+    @Override
+    public void clear() {
+        locks.clear();
+    }
+
+    @Override
+    public ReadWriteLock getReadWriteLock(Object key) {
+        return locks.get(key);
+    }
 }

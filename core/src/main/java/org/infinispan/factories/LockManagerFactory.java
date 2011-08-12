@@ -23,9 +23,13 @@
 package org.infinispan.factories;
 
 import org.infinispan.factories.annotations.DefaultFactoryFor;
+import org.infinispan.util.concurrent.IsolationLevel;
 import org.infinispan.util.concurrent.locks.DeadlockDetectingLockManager;
 import org.infinispan.util.concurrent.locks.LockManager;
 import org.infinispan.util.concurrent.locks.LockManagerImpl;
+import org.infinispan.util.concurrent.locks.readwritelock.DeadlockDetectingReadWriteLockManager;
+import org.infinispan.util.concurrent.locks.readwritelock.ReadWriteLockManager;
+import org.infinispan.util.concurrent.locks.readwritelock.ReadWriteLockManagerImpl;
 
 /**
  * Factory class that creates instances of {@link LockManager}.
@@ -33,14 +37,21 @@ import org.infinispan.util.concurrent.locks.LockManagerImpl;
  * @author Manik Surtani (<a href="mailto:manik@jboss.org">manik@jboss.org</a>)
  * @since 4.0
  */
-@DefaultFactoryFor(classes = LockManager.class)
+@DefaultFactoryFor(classes = {LockManager.class, ReadWriteLockManager.class})
 public class LockManagerFactory extends AbstractNamedCacheComponentFactory implements AutoInstantiableFactory {
-   public <T> T construct(Class<T> componentType) {
-       //TODO: Pedro: construct new lock manager
-      if (configuration.isEnableDeadlockDetection()) {
-         return (T) new DeadlockDetectingLockManager();
-      } else {
-         return (T) new LockManagerImpl();
-      }
-   }
+    public <T> T construct(Class<T> componentType) {
+        if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
+            if (configuration.isEnableDeadlockDetection()) {
+                return (T) new DeadlockDetectingReadWriteLockManager();
+            } else {
+                return (T) new ReadWriteLockManagerImpl();
+            }
+        } else {
+            if (configuration.isEnableDeadlockDetection()) {
+                return (T) new DeadlockDetectingLockManager();
+            } else {
+                return (T) new LockManagerImpl();
+            }
+        }
+    }
 }

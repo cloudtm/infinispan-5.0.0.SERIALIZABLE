@@ -187,6 +187,8 @@ public interface CommandsFactory {
      */
     CommitCommand buildCommitCommand(GlobalTransaction gtx);
 
+    CommitCommand buildCommitCommand(GlobalTransaction gtx, VersionVC commitVersion);
+
     /**
      * Builds a RollbackCommand
      * @param gtx global transaction associated with the rollback
@@ -335,7 +337,8 @@ public interface CommandsFactory {
      */
     VoteCommand buildVoteCommand(GlobalTransaction gtx, boolean success, Set<Object> keys);
 
-    AcquireValidationLocksCommand buildAcquireValidationLocksCommand(Set<Object> readSet, Set<Object> writeSet, VersionVC version);
+    AcquireValidationLocksCommand buildAcquireValidationLocksCommand(GlobalTransaction gtx, Set<Object> readSet,
+                                                                     Set<Object> writeSet, VersionVC version);
 
     PrepareCommand buildPrepareCommand(GlobalTransaction gtx, List<WriteCommand> modifications,
                                               Set<Object> readSet, VersionVC version,

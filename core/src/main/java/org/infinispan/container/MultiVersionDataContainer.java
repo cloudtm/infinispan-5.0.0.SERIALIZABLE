@@ -4,11 +4,14 @@ import org.infinispan.Version;
 import org.infinispan.container.entries.InternalCacheEntry;
 import org.infinispan.container.entries.InternalEntryFactory;
 import org.infinispan.factories.annotations.Inject;
+import org.infinispan.factories.annotations.Stop;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.CommitLog;
 import org.infinispan.mvcc.VBox;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.util.Immutables;
+import org.infinispan.util.logging.Log;
+import org.infinispan.util.logging.LogFactory;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -20,6 +23,8 @@ import java.util.concurrent.ConcurrentMap;
  */
 public class MultiVersionDataContainer implements DataContainer {
 
+    private static final Log log = LogFactory.getLog(MultiVersionDataContainer.class);
+
     private CommitLog commitLog;
     private final InternalEntryFactory entryFactory;
     private final ConcurrentMap<Object, VBox> entries;
@@ -27,6 +32,11 @@ public class MultiVersionDataContainer implements DataContainer {
     public MultiVersionDataContainer(int concurrencyLevel) {
         entryFactory = new InternalEntryFactory();
         entries = new ConcurrentHashMap<Object, VBox>(128, 0.75f, concurrencyLevel);
+    }
+
+    @Stop
+    public void stop() {
+        entries.clear();
     }
 
     private InternalMVCCEntry wrap(VBox vbox, VersionVC visible,  boolean mostRecent, boolean touch, boolean ignoreExpire) {
@@ -48,6 +58,11 @@ public class MultiVersionDataContainer implements DataContainer {
             }
         }
         return vbox;
+    }
+
+    //debug
+    private static void printVBox(VBox vbox) {
+        log.debugf("printing vbox chain: %s", vbox != null ? vbox.getVBoxChain() : "null");
     }
 
     @Inject
@@ -121,6 +136,8 @@ public class MultiVersionDataContainer implements DataContainer {
         if(ime.getValue() == null) {
             entries.remove(k);
         }
+        log.debugf("read key [%s] with max vector clock of %s. returned value is %s",
+                k, max, ime);
         return ime;
     }
 
@@ -140,6 +157,7 @@ public class MultiVersionDataContainer implements DataContainer {
         if(prev == null) {
             prev = entries.putIfAbsent(k, newVbox);
             if(prev == null) {
+                log.debugf("added new value to key [%s] with version %s", k, newVbox.getVersion());
                 return ;
             }
             //ops... maybe it exists now... lets replace it
@@ -152,6 +170,8 @@ public class MultiVersionDataContainer implements DataContainer {
             newVbox.setPrevious(prev);
             newVbox.updatedVersion();
         }
+        log.debugf("added new value to key [%s] with version %s", k, newVbox.getVersion());
+        printVBox(newVbox);
     }
 
     @Override
@@ -253,18 +273,22 @@ public class MultiVersionDataContainer implements DataContainer {
         return new EntryIterator(new VBoxIterator(entries.values().iterator(), commitLog.getActualVersion()));
     }
 
-    public void addNewCommittedTransaction(VersionVC newVersion) {
-        commitLog.addNewVersion(newVersion);
+    public void addNewCommittedTransaction(VersionVC newVersion, int idx) {
+        commitLog.addNewVersion(newVersion, idx);
+        commitLog.commitLock.unlock();
     }
 
     @Override
     public boolean validateKey(Object key, int idx, long value) {
+
         VBox actual = entries.get(key);
         if(actual == null) {
+            log.debugf("validate key [%s], but it is null in data container. return true", key);
             return true;
         }
         long actualValue = actual.getVersion().get(idx);
-
+        log.debugf("validate key [%s]. most recent version is %s. compare with %s in position %s",
+                key, actual.getVersion(), value, idx);
         return actualValue <= value;
     }
 

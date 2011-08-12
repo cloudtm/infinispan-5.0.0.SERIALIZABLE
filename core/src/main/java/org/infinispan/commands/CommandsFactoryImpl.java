@@ -212,6 +212,12 @@ public class CommandsFactoryImpl implements CommandsFactory {
         return commitCommand;
     }
 
+    public CommitCommand buildCommitCommand(GlobalTransaction gtx, VersionVC commitVersion) {
+        CommitCommand commitCommand = new CommitCommand(gtx,commitVersion);
+        commitCommand.setCacheName(cacheName);
+        return commitCommand;
+    }
+
     public RollbackCommand buildRollbackCommand(GlobalTransaction gtx) {
         RollbackCommand rollbackCommand = new RollbackCommand(gtx);
         rollbackCommand.setCacheName(cacheName);
@@ -448,7 +454,7 @@ public class CommandsFactoryImpl implements CommandsFactory {
     }
 
     @Override
-    public AcquireValidationLocksCommand buildAcquireValidationLocksCommand(Set<Object> readSet, Set<Object> writeSet, VersionVC version) {
-        return new AcquireValidationLocksCommand(readSet,writeSet, version);
+    public AcquireValidationLocksCommand buildAcquireValidationLocksCommand(GlobalTransaction gtx, Set<Object> readSet, Set<Object> writeSet, VersionVC version) {
+        return new AcquireValidationLocksCommand(gtx, readSet,writeSet, version);
     }
 }

@@ -347,7 +347,7 @@ public final class Util {
    }
 
     public static String prettyPrintGlobalTransaction(GlobalTransaction gtx) {
-        return new StringBuilder(gtx.getAddress().toString()).append(":").append(gtx.getId()).toString();
+        return new StringBuilder(gtx.getAddress() != null ? gtx.getAddress().toString() : "local").append(":").append(gtx.getId()).toString();
     }
 
    public static void close(Closeable cl) {

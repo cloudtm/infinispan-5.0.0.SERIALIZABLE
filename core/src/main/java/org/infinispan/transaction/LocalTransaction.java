@@ -26,6 +26,7 @@ package org.infinispan.transaction;
 import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.transaction.xa.GlobalTransaction;
 import org.infinispan.util.BidirectionalLinkedHashMap;
@@ -54,6 +55,8 @@ public abstract class LocalTransaction extends AbstractCacheTransaction {
     private volatile boolean isMarkedForRollback;
 
     private final Transaction transaction;
+
+    private VersionVC commitVersion;
 
     public LocalTransaction(Transaction transaction, GlobalTransaction tx) {
         super.tx = tx;
@@ -168,5 +171,13 @@ public abstract class LocalTransaction extends AbstractCacheTransaction {
             readSet = new HashMap<Object, InternalMVCCEntry>();
         }
         readSet.put(key, ime);
+    }
+
+    public void setCommitVersion(VersionVC version) {
+        this.commitVersion = version;
+    }
+
+    public VersionVC getCommitVersion() {
+        return commitVersion;
     }
 }

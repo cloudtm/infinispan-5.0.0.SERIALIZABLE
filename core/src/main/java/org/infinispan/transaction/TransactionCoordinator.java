@@ -174,7 +174,14 @@ public class TransactionCoordinator {
                 }
             } else {
                 handleTopologyChanges(localTransaction);
-                CommitCommand commitCommand = commandsFactory.buildCommitCommand(localTransaction.getGlobalTransaction());
+                CommitCommand commitCommand;
+                if(useSerializable) {
+                    commitCommand = commandsFactory.buildCommitCommand(localTransaction.getGlobalTransaction(),
+                            localTransaction.getCommitVersion());
+                } else {
+                    commitCommand = commandsFactory.buildCommitCommand(localTransaction.getGlobalTransaction());
+                }
+
                 try {
                     invoker.invoke(ctx, commitCommand);
                     txTable.removeLocalTransaction(localTransaction);
