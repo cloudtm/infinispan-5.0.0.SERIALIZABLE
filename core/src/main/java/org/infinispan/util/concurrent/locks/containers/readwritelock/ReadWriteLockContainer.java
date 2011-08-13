@@ -38,4 +38,6 @@ public interface ReadWriteLockContainer extends LockContainer {
     void clear();
 
     ReadWriteLock getReadWriteLock(Object key);
+
+    boolean ownsReadOrWriteLock(Object owner, Object key);
 }

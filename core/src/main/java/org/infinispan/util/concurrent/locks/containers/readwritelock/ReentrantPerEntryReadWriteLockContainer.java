@@ -28,7 +28,7 @@ public class ReentrantPerEntryReadWriteLockContainer extends AbstractPerEntryRea
     @Override
     public boolean ownsLock(Object key, Object owner) {
         ReentrantReadWriteLock l = getReentrantReadWriteLock(key);
-        return l != null && l.writeLock().isHeldByCurrentThread();
+        return l != null && l.isWriteLockedByCurrentThread();
     }
 
     @Override
@@ -44,5 +44,11 @@ public class ReentrantPerEntryReadWriteLockContainer extends AbstractPerEntryRea
     @Override
     public String toString() {
         return "ReentrantPerEntryReadWriteLockContainer{number of locks="+ locks.size() +"}";
+    }
+
+    @Override
+    public boolean ownsReadOrWriteLock(Object owner, Object key) {
+        ReentrantReadWriteLock l = getReentrantReadWriteLock(key);
+        return l != null && (l.isWriteLockedByCurrentThread() || l.getReadLockCount() != 0);
     }
 }

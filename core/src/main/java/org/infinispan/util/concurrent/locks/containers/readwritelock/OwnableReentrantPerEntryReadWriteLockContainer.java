@@ -36,6 +36,12 @@ public class OwnableReentrantPerEntryReadWriteLockContainer extends AbstractPerE
     }
 
     @Override
+    public boolean ownsReadOrWriteLock(Object owner, Object key) {
+        OwnableReentrantReadWriteLock l = getOwnableReentrantReadWriteLock(key);
+        return owner != null && l.hasReadOrWriteLock(owner);
+    }
+
+    @Override
     public boolean isLocked(Object key) {
         OwnableReentrantReadWriteLock l = getOwnableReentrantReadWriteLock(key);
         return l != null && l.isWriteLock();

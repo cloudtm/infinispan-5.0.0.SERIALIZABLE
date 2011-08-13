@@ -82,4 +82,10 @@ public class OwnableReentrantStripedReadWriteLockContainer extends AbstractStrip
     public ReadWriteLock getReadWriteLock(Object key) {
         return sharedLocks[hashToIndex(key)];
     }
+
+    @Override
+    public boolean ownsReadOrWriteLock(Object owner, Object key) {
+        OwnableReentrantReadWriteLock l = sharedLocks[hashToIndex(key)];
+        return owner != null && l.hasReadOrWriteLock(owner);
+    }
 }

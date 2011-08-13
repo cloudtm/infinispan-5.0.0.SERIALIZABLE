@@ -35,4 +35,6 @@ public interface ReadWriteLockManager extends LockManager {
      * @return the lock acquisition timeout
      */
     long getLockAcquisitionTimeout(InvocationContext ctx);
+
+    void unlockAfterCommit(InvocationContext ctx);
 }

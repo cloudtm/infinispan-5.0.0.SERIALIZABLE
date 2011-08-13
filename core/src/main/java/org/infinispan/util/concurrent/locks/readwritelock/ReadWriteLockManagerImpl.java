@@ -273,9 +273,37 @@ public class ReadWriteLockManagerImpl implements ReadWriteLockManager {
         return lockContainer.getLockId(key);
     }
 
+    @Override
+    public void unlockAfterCommit(InvocationContext ctx) {
+        ReversibleOrderedSet<Map.Entry<Object, CacheEntry>> entries = ctx.getLookedUpEntries().entrySet();
+        if (!entries.isEmpty()) {
+            // unlocking needs to be done in reverse order.
+            Iterator<Map.Entry<Object, CacheEntry>> it = entries.reverseIterator();
+            while (it.hasNext()) {
+                Object k = it.next().getKey();
+                if (trace) {
+                    log.tracef("Attempting to unlock %s", k);
+                }
+
+                //first release the read lock and then the write lock... the lock acquisition is done
+                //in the reverse order, ie, first the write and then the read.
+                try {
+                    lockContainer.releaseSharedLock(k);
+                } catch (IllegalMonitorStateException imse) {
+                    //no-op
+                }
+                try {
+                    lockContainer.releaseLock(k);
+                } catch (IllegalMonitorStateException imse) {
+                    //no-op
+                }
+            }
+        }
+    }
+
     /*
-     * ======================= JMX == STATS =============================
-     */
+    * ======================= JMX == STATS =============================
+    */
 
     @ManagedAttribute(description = "The concurrency level that the MVCC Lock Manager has been configured with.")
     @Metric(displayName = "Concurrency level", dataType = DataType.TRAIT)

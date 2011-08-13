@@ -4,6 +4,7 @@ import org.infinispan.CacheException;
 import org.infinispan.commands.CommandsFactory;
 import org.infinispan.commands.read.GetKeyValueCommand;
 import org.infinispan.commands.tx.AcquireValidationLocksCommand;
+import org.infinispan.commands.tx.CommitCommand;
 import org.infinispan.commands.tx.PrepareCommand;
 import org.infinispan.commands.tx.RollbackCommand;
 import org.infinispan.container.DataContainer;
@@ -71,9 +72,23 @@ public class SerialTxInterceptor extends TxInterceptor {
     }
 
     @Override
+    public Object visitCommitCommand(TxInvocationContext ctx, CommitCommand command) throws Throwable {
+        if(ctx.isInTxScope() && ctx.isOriginLocal() && !ctx.hasModifications()) {
+            log.debugf("try commit a read-only transaction [%s]. returning...",
+                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
+            return null;
+        }
+        return super.visitCommitCommand(ctx, command);
+    }
+
+    @Override
     public Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable {
         Object retval = super.visitRollbackCommand(ctx, command);
-        commitLog.commitLock.unlock();
+        try {
+            commitLog.commitLock.unlock();
+        } catch(Exception e) {
+            //no-op
+        }
         return retval;
     }
 

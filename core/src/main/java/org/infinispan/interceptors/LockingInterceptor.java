@@ -150,14 +150,18 @@ public class LockingInterceptor extends CommandInterceptor {
                     Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), command.getWriteSet());
             for(Object k : command.getWriteSet()) {
                 rwlman.lockAndRecord(k, ctx);
-                ctx.putLookedUpEntry(k, null); //to release later
+                if(!ctx.getLookedUpEntries().containsKey(k)) {
+                    ctx.putLookedUpEntry(k, null); //to release later
+                }
             }
 
             log.debugf("validate transaction [%s] read set %s",
                     Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), command.getReadSet());
             for(Object k : command.getReadSet()) {
                 rwlman.sharedLockAndRecord(k, ctx);
-                ctx.putLookedUpEntry(k, null); //same reason above (release later)
+                if(!ctx.getLookedUpEntries().containsKey(k)) {
+                    ctx.putLookedUpEntry(k, null); //same reason above (release later)
+                }
                 validateKey(k, command.getVersion());
             }
 
@@ -430,7 +434,7 @@ public class LockingInterceptor extends CommandInterceptor {
                 if(ctx.isInTxScope() && commitVersion != null) {
                     ((MultiVersionDataContainer) dataContainer).addNewCommittedTransaction(commitVersion,0);
                 }
-                lockManager.unlock(ctx); //this not call the entry.rollback() (instead of releaseLocks(ctx))
+                ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx); //this not call the entry.rollback() (instead of releaseLocks(ctx))
             }
         } else {
             lockManager.releaseLocks(ctx);

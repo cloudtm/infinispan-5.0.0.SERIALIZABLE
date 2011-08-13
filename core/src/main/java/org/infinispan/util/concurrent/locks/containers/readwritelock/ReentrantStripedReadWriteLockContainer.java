@@ -79,4 +79,10 @@ public class ReentrantStripedReadWriteLockContainer extends AbstractStripedReadW
     public ReadWriteLock getReadWriteLock(Object key) {
         return sharedLocks[hashToIndex(key)];
     }
+
+    @Override
+    public boolean ownsReadOrWriteLock(Object owner, Object key) {
+        ReentrantReadWriteLock l = sharedLocks[hashToIndex(key)];
+        return l != null && (l.isWriteLockedByCurrentThread() || l.getReadLockCount() != 0);
+    }
 }

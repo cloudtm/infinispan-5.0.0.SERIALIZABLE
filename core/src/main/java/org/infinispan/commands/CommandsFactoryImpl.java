@@ -59,6 +59,7 @@ import org.infinispan.transaction.TransactionTable;
 import org.infinispan.transaction.xa.DldGlobalTransaction;
 import org.infinispan.transaction.xa.GlobalTransaction;
 import org.infinispan.transaction.xa.recovery.RecoveryManager;
+import org.infinispan.util.concurrent.IsolationLevel;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
 
@@ -290,6 +291,9 @@ public class CommandsFactoryImpl implements CommandsFactory {
                 if (configuration.isEnableDeadlockDetection() && isRemote) {
                     DldGlobalTransaction transaction = (DldGlobalTransaction) pc.getGlobalTransaction();
                     transaction.setLocksHeldAtOrigin(pc.getAffectedKeys());
+                    if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
+                        transaction.setReadLocksHeldAtOrigin(pc.getReadSet());
+                    }
                 }
                 break;
             case CommitCommand.COMMAND_ID:

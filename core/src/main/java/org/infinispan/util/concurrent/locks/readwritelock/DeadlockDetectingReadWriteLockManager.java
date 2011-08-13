@@ -70,7 +70,7 @@ public class DeadlockDetectingReadWriteLockManager extends ReadWriteLockManagerI
         if (localLockOwner) {
             // I've already acquired lock on this key before replicating here, so this mean we are in deadlock.
             // This assumes the fact that if trying to acquire a remote lock, a tx first acquires a local lock.
-            if (thisTx.hasLockAtOrigin(lockOwnerTx.getRemoteLockIntention())) {
+            if (thisTx.hasLockAtOrigin(lockOwnerTx)) { //read write lock implementation
                 if (trace) {
                     log.tracef("Same key deadlock detected: lock owner tries to acquire lock remotely on %s " +
                             "but we have it!", key);
@@ -86,7 +86,8 @@ public class DeadlockDetectingReadWriteLockManager extends ReadWriteLockManagerI
     }
 
     private boolean ownsLocalIntention(DldGlobalTransaction thisTx, Object lockOwnerTxIntention) {
-        boolean result = lockOwnerTxIntention != null && ownsLock(lockOwnerTxIntention, thisTx);
+        boolean result = lockOwnerTxIntention != null &&
+                lockContainer.ownsReadOrWriteLock(thisTx, lockOwnerTxIntention);
         if (trace) {
             log.tracef("Local intention is '%s'. Do we own lock for it? %s, We == %s",
                     lockOwnerTxIntention, result, thisTx);

@@ -65,7 +65,7 @@ public class EmptyConstructorNamedCacheFactory extends AbstractNamedCacheCompone
             return componentType.cast(versionAwareMarshaller);
          } if (componentType.equals(EntryFactory.class) &&
                   configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
-              return (T) new MultiVersionEntryFactoryImpl();
+              return componentType.cast(getInstance(MultiVersionEntryFactoryImpl.class));
 
           } else {
             // add an "Impl" to the end of the class name and try again

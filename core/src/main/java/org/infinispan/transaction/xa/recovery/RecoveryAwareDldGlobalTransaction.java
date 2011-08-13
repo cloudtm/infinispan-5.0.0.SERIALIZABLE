@@ -47,91 +47,97 @@ import static java.util.Collections.emptySet;
  */
 public class RecoveryAwareDldGlobalTransaction extends DldGlobalTransaction implements RecoverableTransactionIdentifier {
 
-   public RecoveryAwareDldGlobalTransaction() {
-   }
+    public RecoveryAwareDldGlobalTransaction() {
+    }
 
-   public RecoveryAwareDldGlobalTransaction(Address addr, boolean remote) {
-      super(addr, remote);
-   }
+    public RecoveryAwareDldGlobalTransaction(Address addr, boolean remote) {
+        super(addr, remote);
+    }
 
-   private volatile Xid xid;
+    private volatile Xid xid;
 
-   private volatile long internalId;
+    private volatile long internalId;
 
-   @Override
-   public Xid getXid() {
-      return xid;
-   }
+    @Override
+    public Xid getXid() {
+        return xid;
+    }
 
-   @Override
-   public void setXid(Xid xid) {
-      this.xid = xid;
-   }
+    @Override
+    public void setXid(Xid xid) {
+        this.xid = xid;
+    }
 
-   @Override
-   public long getInternalId() {
-      return internalId;
-   }
+    @Override
+    public long getInternalId() {
+        return internalId;
+    }
 
-   @Override
-   public void setInternalId(long internalId) {
-      this.internalId = internalId;
-   }
+    @Override
+    public void setInternalId(long internalId) {
+        this.internalId = internalId;
+    }
 
-   public static class Externalizer extends GlobalTransaction.AbstractGlobalTxExternalizer<RecoveryAwareDldGlobalTransaction> {
-      @Override
-      public void writeObject(ObjectOutput output, RecoveryAwareDldGlobalTransaction globalTransaction) throws IOException {
-         super.writeObject(output, globalTransaction);
-         output.writeLong(globalTransaction.getCoinToss());
-         if (globalTransaction.locksAtOrigin.isEmpty()) {
-            output.writeObject(null);
-         } else {
-            output.writeObject(globalTransaction.locksAtOrigin);
-         }
+    public static class Externalizer extends GlobalTransaction.AbstractGlobalTxExternalizer<RecoveryAwareDldGlobalTransaction> {
+        @Override
+        public void writeObject(ObjectOutput output, RecoveryAwareDldGlobalTransaction globalTransaction) throws IOException {
+            super.writeObject(output, globalTransaction);
+            output.writeLong(globalTransaction.getCoinToss());
+            if (globalTransaction.locksAtOrigin.isEmpty()) {
+                output.writeObject(null);
+            } else {
+                output.writeObject(globalTransaction.locksAtOrigin);
+            }
 
-         output.writeObject(globalTransaction.xid);
-         output.writeLong(globalTransaction.internalId);
-      }
+            output.writeObject(globalTransaction.xid);
+            output.writeLong(globalTransaction.internalId);
+        }
 
-      @Override
-      protected RecoveryAwareDldGlobalTransaction createGlobalTransaction() {
-         return (RecoveryAwareDldGlobalTransaction) TransactionFactory.TxFactoryEnum.DLD_RECOVERY_XA.newGlobalTransaction();
-      }
+        @Override
+        protected RecoveryAwareDldGlobalTransaction createGlobalTransaction() {
+            return (RecoveryAwareDldGlobalTransaction) TransactionFactory.TxFactoryEnum.DLD_RECOVERY_XA.newGlobalTransaction();
+        }
 
-      @Override
-      @SuppressWarnings("unchecked")
-      public RecoveryAwareDldGlobalTransaction readObject(ObjectInput input) throws IOException, ClassNotFoundException {
-         RecoveryAwareDldGlobalTransaction globalTransaction = super.readObject(input);
-         globalTransaction.setCoinToss(input.readLong());
-         Object locksAtOriginObj = input.readObject();
-         if (locksAtOriginObj == null) {
-            globalTransaction.setLocksHeldAtOrigin(emptySet());
-         } else {
-            globalTransaction.setLocksHeldAtOrigin((Set<Object>) locksAtOriginObj);
-         }
+        @Override
+        @SuppressWarnings("unchecked")
+        public RecoveryAwareDldGlobalTransaction readObject(ObjectInput input) throws IOException, ClassNotFoundException {
+            RecoveryAwareDldGlobalTransaction globalTransaction = super.readObject(input);
+            globalTransaction.setCoinToss(input.readLong());
+            Object locksAtOriginObj = input.readObject();
+            Object readLockAtOriginObj = input.readObject();
+            if (locksAtOriginObj == null) {
+                globalTransaction.setLocksHeldAtOrigin(emptySet());
+            } else {
+                globalTransaction.setLocksHeldAtOrigin((Set<Object>) locksAtOriginObj);
+            }
+            if(readLockAtOriginObj == null) {
+                globalTransaction.setReadLocksHeldAtOrigin(emptySet());
+            } else {
+                globalTransaction.setReadLocksHeldAtOrigin((Set<Object>) readLockAtOriginObj);
+            }
 
-         Xid xid = (Xid) input.readObject();
-         globalTransaction.setXid(xid);
-         globalTransaction.setInternalId(input.readLong());
-         return globalTransaction;
-      }
+            Xid xid = (Xid) input.readObject();
+            globalTransaction.setXid(xid);
+            globalTransaction.setInternalId(input.readLong());
+            return globalTransaction;
+        }
 
-      @Override
-      public Integer getId() {
-         return Ids.XID_DEADLOCK_DETECTING_GLOBAL_TRANSACTION;
-      }
+        @Override
+        public Integer getId() {
+            return Ids.XID_DEADLOCK_DETECTING_GLOBAL_TRANSACTION;
+        }
 
-      @Override
-      public Set<Class<? extends RecoveryAwareDldGlobalTransaction>> getTypeClasses() {
-         return Util.<Class<? extends RecoveryAwareDldGlobalTransaction>>asSet(RecoveryAwareDldGlobalTransaction.class);
-      }
-   }
+        @Override
+        public Set<Class<? extends RecoveryAwareDldGlobalTransaction>> getTypeClasses() {
+            return Util.<Class<? extends RecoveryAwareDldGlobalTransaction>>asSet(RecoveryAwareDldGlobalTransaction.class);
+        }
+    }
 
-   @Override
-   public String toString() {
-      return getClass().getSimpleName() +
-            "{xid=" + xid +
-            ", internalId=" + internalId +
-            "} " + super.toString();
-   }
+    @Override
+    public String toString() {
+        return getClass().getSimpleName() +
+                "{xid=" + xid +
+                ", internalId=" + internalId +
+                "} " + super.toString();
+    }
 }

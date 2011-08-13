@@ -260,4 +260,8 @@ public class OwnableReentrantReadWriteLock implements ReadWriteLock {
                 .append("writer=").append(writer)
                 .append("}").toString();
     }
+
+    public boolean hasReadOrWriteLock(Object owner) {
+        return owner != null  && (owner.equals(writer) || readers.containsKey(owner));
+    }
 }

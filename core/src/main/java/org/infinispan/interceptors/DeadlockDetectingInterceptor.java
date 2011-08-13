@@ -34,6 +34,9 @@ import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.factories.annotations.Start;
 import org.infinispan.interceptors.base.CommandInterceptor;
 import org.infinispan.transaction.xa.DldGlobalTransaction;
+import org.infinispan.util.concurrent.IsolationLevel;
+
+import java.util.Collections;
 
 import static java.util.Collections.emptySet;
 
@@ -50,57 +53,64 @@ import static java.util.Collections.emptySet;
  */
 public class DeadlockDetectingInterceptor extends CommandInterceptor {
 
-   /**
-    * Only does a sanity check.
-    */
-   @Start
-   public void start() {
-      if (!configuration.isEnableDeadlockDetection()) {
-         throw new IllegalStateException("This interceptor should not be present in the chain as deadlock detection is not used!");
-      }
-   }
+    /**
+     * Only does a sanity check.
+     */
+    @Start
+    public void start() {
+        if (!configuration.isEnableDeadlockDetection()) {
+            throw new IllegalStateException("This interceptor should not be present in the chain as deadlock detection is not used!");
+        }
+    }
 
-   @Override
-   public Object visitPutKeyValueCommand(InvocationContext ctx, PutKeyValueCommand command) throws Throwable {
-      return handleDataCommand(ctx, command);
-   }
+    @Override
+    public Object visitPutKeyValueCommand(InvocationContext ctx, PutKeyValueCommand command) throws Throwable {
+        return handleDataCommand(ctx, command);
+    }
 
-   @Override
-   public Object visitRemoveCommand(InvocationContext ctx, RemoveCommand command) throws Throwable {
-      return handleDataCommand(ctx, command);
-   }
+    @Override
+    public Object visitRemoveCommand(InvocationContext ctx, RemoveCommand command) throws Throwable {
+        return handleDataCommand(ctx, command);
+    }
 
-   @Override
-   public Object visitReplaceCommand(InvocationContext ctx, ReplaceCommand command) throws Throwable {
-      return handleDataCommand(ctx, command);
-   }
+    @Override
+    public Object visitReplaceCommand(InvocationContext ctx, ReplaceCommand command) throws Throwable {
+        return handleDataCommand(ctx, command);
+    }
 
-   @Override
-   public Object visitLockControlCommand(TxInvocationContext ctx, LockControlCommand command) throws Throwable {
-      DldGlobalTransaction globalTransaction = (DldGlobalTransaction) ctx.getGlobalTransaction();
-      if (ctx.isOriginLocal()) {
-         globalTransaction.setRemoteLockIntention(command.getKeys());
-         //in the case of DIST we need to propagate the list of keys. In all other situations in can be determined
-         // based on the actual command
-         if (configuration.getCacheMode().isDistributed()) {
-            ((DldGlobalTransaction) ctx.getGlobalTransaction()).setLocksHeldAtOrigin(ctx.getLockedKeys());
-         }
-      }
-      return handleDataCommand(ctx, command);
-   }
+    @Override
+    public Object visitLockControlCommand(TxInvocationContext ctx, LockControlCommand command) throws Throwable {
+        DldGlobalTransaction globalTransaction = (DldGlobalTransaction) ctx.getGlobalTransaction();
+        if (ctx.isOriginLocal()) {
+            globalTransaction.setRemoteLockIntention(command.getKeys());
+            //in the case of DIST we need to propagate the list of keys. In all other situations in can be determined
+            // based on the actual command
+            if (configuration.getCacheMode().isDistributed()) {
+                ((DldGlobalTransaction) ctx.getGlobalTransaction()).setLocksHeldAtOrigin(ctx.getLockedKeys());
+            }
+        }
+        return handleDataCommand(ctx, command);
+    }
 
-   @Override
-   public Object visitPrepareCommand(TxInvocationContext ctx, PrepareCommand command) throws Throwable {
-      DldGlobalTransaction globalTransaction = (DldGlobalTransaction) ctx.getGlobalTransaction();
-      if (ctx.isOriginLocal()) {
-         globalTransaction.setRemoteLockIntention(command.getAffectedKeys());
-      }
-      Object result = invokeNextInterceptor(ctx, command);
-      if (ctx.isOriginLocal()) {
-         globalTransaction.setRemoteLockIntention(emptySet());
-      }
-      return result;
-   }
+    @Override
+    public Object visitPrepareCommand(TxInvocationContext ctx, PrepareCommand command) throws Throwable {
+        DldGlobalTransaction globalTransaction = (DldGlobalTransaction) ctx.getGlobalTransaction();
+        boolean useSerializable = configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE;
+        if (ctx.isOriginLocal()) {
+            globalTransaction.setRemoteLockIntention(command.getAffectedKeys());
+            if(useSerializable) {
+                globalTransaction.setRemoteReadLockIntention(command.getReadSet());
+            }
+        }
+        Object result = invokeNextInterceptor(ctx, command);
+        if (ctx.isOriginLocal()) {
+            globalTransaction.setRemoteLockIntention(emptySet());
+            if(useSerializable) {
+                globalTransaction.setRemoteReadLockIntention(emptySet());
+            }
+        }
+        return result;
+    }
 
     //pedro
 
@@ -112,6 +122,6 @@ public class DeadlockDetectingInterceptor extends CommandInterceptor {
     }
 
     private Object handleDataCommand(InvocationContext ctx, VisitableCommand command) throws Throwable {
-      return invokeNextInterceptor(ctx, command);
-   }
+        return invokeNextInterceptor(ctx, command);
+    }
 }

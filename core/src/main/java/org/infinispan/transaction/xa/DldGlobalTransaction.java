@@ -31,6 +31,8 @@ import org.infinispan.util.logging.LogFactory;
 import java.io.IOException;
 import java.io.ObjectInput;
 import java.io.ObjectOutput;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 
 import static java.util.Collections.emptySet;
@@ -42,171 +44,213 @@ import static java.util.Collections.emptySet;
  */
 public class DldGlobalTransaction extends GlobalTransaction {
 
-   private static final Log log = LogFactory.getLog(DldGlobalTransaction.class);
+    private static final Log log = LogFactory.getLog(DldGlobalTransaction.class);
 
-   private static final boolean trace = log.isTraceEnabled();
+    private static final boolean trace = log.isTraceEnabled();
 
-   protected volatile long coinToss;
+    protected volatile long coinToss;
 
-   protected volatile boolean isMarkedForRollback;
+    protected volatile boolean isMarkedForRollback;
 
-   protected transient volatile Object localLockIntention;
+    protected transient volatile Object localLockIntention;
 
-   protected volatile Set<Object> remoteLockIntention = emptySet();
+    protected volatile Set<Object> remoteLockIntention = emptySet();
+    //the same above, but to readSet in serializable isolation level
+    protected volatile Set<Object> remoteReadLockIntention = emptySet();
 
-   protected volatile Set<Object> locksAtOrigin = emptySet();
+    protected volatile Set<Object> locksAtOrigin = emptySet();
+    //the same above, but to readSet in serializable isolation level
+    protected volatile Set<Object> readLocksAtOrigin = emptySet();
 
-   public DldGlobalTransaction() {
-   }
+    public DldGlobalTransaction() {
+    }
 
-   public DldGlobalTransaction(Address addr, boolean remote) {
-      super(addr, remote);
-   }
+    public DldGlobalTransaction(Address addr, boolean remote) {
+        super(addr, remote);
+    }
 
 
-   /**
-    * Sets the random number that defines the coin toss. A coin toss is a random number that is used when a deadlock is
-    * detected for deciding which transaction should commit and which should rollback.
-    */
-   public void setCoinToss(long coinToss) {
-      this.coinToss = coinToss;
-   }
+    /**
+     * Sets the random number that defines the coin toss. A coin toss is a random number that is used when a deadlock is
+     * detected for deciding which transaction should commit and which should rollback.
+     */
+    public void setCoinToss(long coinToss) {
+        this.coinToss = coinToss;
+    }
 
-   public long getCoinToss() {
-      return coinToss;
-   }
+    public long getCoinToss() {
+        return coinToss;
+    }
 
-   @Override
-   public boolean equals(Object o) {
-      if (this == o) return true;
-      if (!(o instanceof DldGlobalTransaction)) return false;
-      if (!super.equals(o)) return false;
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof DldGlobalTransaction)) return false;
+        if (!super.equals(o)) return false;
 
-      DldGlobalTransaction that = (DldGlobalTransaction) o;
+        DldGlobalTransaction that = (DldGlobalTransaction) o;
 
-      if (coinToss != that.coinToss) return false;
-      return true;
-   }
+        if (coinToss != that.coinToss) return false;
+        return true;
+    }
 
-   @Override
-   public int hashCode() {
-      int result = super.hashCode();
-      result = 31 * result + (int) (coinToss ^ (coinToss >>> 32));
-      return result;
-   }
+    @Override
+    public int hashCode() {
+        int result = super.hashCode();
+        result = 31 * result + (int) (coinToss ^ (coinToss >>> 32));
+        return result;
+    }
 
-   @Override
-   public String toString() {
-      return "DldGlobalTransaction{" +
-            "coinToss=" + coinToss +
-            ", isMarkedForRollback=" + isMarkedForRollback +
-            ", lockIntention=" + localLockIntention +
-            ", affectedKeys=" + remoteLockIntention +
-            ", locksAtOrigin=" + locksAtOrigin +
-            "} " + super.toString();
-   }
+    @Override
+    public String toString() {
+        return "DldGlobalTransaction{" +
+                "coinToss=" + coinToss +
+                ", isMarkedForRollback=" + isMarkedForRollback +
+                ", lockIntention=" + localLockIntention +
+                ", affectedKeys=" + remoteLockIntention +
+                ", locksAtOrigin=" + locksAtOrigin +
+                "} " + super.toString();
+    }
 
-   public boolean isMarkedForRollback() {
-      return isMarkedForRollback;
-   }
+    public boolean isMarkedForRollback() {
+        return isMarkedForRollback;
+    }
 
-   public void setMarkedForRollback(boolean markedForRollback) {
-      isMarkedForRollback = markedForRollback;
-   }
+    public void setMarkedForRollback(boolean markedForRollback) {
+        isMarkedForRollback = markedForRollback;
+    }
 
-   /**
-    * Returns the key this transaction intends to lock. 
-    */
-   public Object getLockIntention() {
-      return localLockIntention;
-   }
+    /**
+     * Returns the key this transaction intends to lock.
+     */
+    public Object getLockIntention() {
+        return localLockIntention;
+    }
 
-   public void setLockIntention(Object lockIntention) {                                                                                                       
-      this.localLockIntention = lockIntention;
-   }
+    public void setLockIntention(Object lockIntention) {
+        this.localLockIntention = lockIntention;
+    }
 
-   public boolean wouldLose(DldGlobalTransaction other) {
-      return this.coinToss < other.coinToss;
-   }
+    public boolean wouldLose(DldGlobalTransaction other) {
+        return this.coinToss < other.coinToss;
+    }
 
-   public boolean isAcquiringRemoteLock(Object key, Address address) {
-      boolean contains = remoteLockIntention.contains(key);
-      if (trace) log.tracef("Intention check: does %s contain %s? %b", remoteLockIntention, key, contains);
-      return contains; //this works for replication
-   }
+    public boolean isAcquiringRemoteLock(Object key, Address address) {
+        boolean contains = remoteLockIntention.contains(key);
+        if (trace) log.tracef("Intention check: does %s contain %s? %b", remoteLockIntention, key, contains);
+        return contains; //this works for replication
+    }
 
-   public void setRemoteLockIntention(Set<Object> remoteLockIntention) {
-      if (trace) {
-         log.tracef("Setting the remote lock intention: %s", remoteLockIntention);
-      }
-      this.remoteLockIntention = remoteLockIntention;
-   }
+    public void setRemoteLockIntention(Set<Object> remoteLockIntention) {
+        if (trace) {
+            log.tracef("Setting the remote lock intention: %s", remoteLockIntention);
+        }
+        this.remoteLockIntention = remoteLockIntention;
+    }
 
-   public Set<Object> getRemoteLockIntention() {
-      return remoteLockIntention;
-   }
+    public Set<Object> getRemoteLockIntention() {
+        return remoteLockIntention;
+    }
 
-   public boolean hasLockAtOrigin(Set<Object> remoteLockIntention) {
-      if (log.isTraceEnabled())
-         log.tracef("Our(%s) locks at origin are: %s. Others remote lock intention is: %s",
+    public boolean hasLockAtOrigin(Set<Object> remoteLockIntention) {
+        if (log.isTraceEnabled())
+            log.tracef("Our(%s) locks at origin are: %s. Others remote lock intention is: %s",
                     this, locksAtOrigin, remoteLockIntention);
-      for (Object key : remoteLockIntention) {
-         if (this.locksAtOrigin.contains(key)) {
-            return true;
-         }
-      }
-      return false;
-   }
+        for (Object key : remoteLockIntention) {
+            if (this.locksAtOrigin.contains(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
-   public void setLocksHeldAtOrigin(Set<Object> locksAtOrigin) {
-      if (trace) log.tracef("Setting locks at origin for (%s) to %s", this, locksAtOrigin);
-      this.locksAtOrigin = locksAtOrigin;
-   }
+    public void setLocksHeldAtOrigin(Set<Object> locksAtOrigin) {
+        if (trace) log.tracef("Setting locks at origin for (%s) to %s", this, locksAtOrigin);
+        this.locksAtOrigin = locksAtOrigin;
+    }
 
-   public Set<Object> getLocksHeldAtOrigin() {
-      return this.locksAtOrigin;
-   }
+    public Set<Object> getLocksHeldAtOrigin() {
+        return this.locksAtOrigin;
+    }
 
-   public static class Externalizer extends GlobalTransaction.AbstractGlobalTxExternalizer<DldGlobalTransaction> {
+    public void setReadLocksHeldAtOrigin(Set<Object> readLocksAtOrigin) {
+        if (trace) {
+            log.tracef("Setting *read* locks at origin for (%s) to %s", this, locksAtOrigin);
+        }
+        this.readLocksAtOrigin = readLocksAtOrigin;
+    }
 
-      @Override
-      protected DldGlobalTransaction createGlobalTransaction() {
-         return (DldGlobalTransaction) TransactionFactory.TxFactoryEnum.DLD_NORECOVERY_XA.newGlobalTransaction();
-      }
+    public void setRemoteReadLockIntention(Set<Object> remoteReadLockIntention) {
+        if (trace) {
+            log.tracef("Setting the remote read lock intention for (%s) to %s", this, remoteReadLockIntention);
+        }
+        this.remoteReadLockIntention = remoteReadLockIntention;
+    }
 
-      @Override
-      public void writeObject(ObjectOutput output, DldGlobalTransaction ddGt) throws IOException {
-         super.writeObject(output, ddGt);
-         output.writeLong(ddGt.getCoinToss());
-         if (ddGt.locksAtOrigin.isEmpty()) {
-            output.writeObject(null);
-         } else {
-            output.writeObject(ddGt.locksAtOrigin);
-         }
-      }
+    public boolean hasLockAtOrigin(DldGlobalTransaction other) {
+        Set<Object> conflictingLocks = new HashSet<Object>(locksAtOrigin);
+        conflictingLocks.addAll(readLocksAtOrigin);
+        conflictingLocks.retainAll(other.remoteLockIntention);
+        conflictingLocks.retainAll(other.remoteReadLockIntention);
+        for(Object lock : conflictingLocks) {
+            if(locksAtOrigin.contains(lock) || other.remoteLockIntention.contains(lock)) {
+                return true; //conflict and one of them it is a write lock
+            }
+        }
+        return false;
+    }
 
-      @Override
-      @SuppressWarnings("unchecked")
-      public DldGlobalTransaction readObject(ObjectInput input) throws IOException, ClassNotFoundException {
-         DldGlobalTransaction ddGt = super.readObject(input);
-         ddGt.setCoinToss(input.readLong());
-         Object locksAtOriginObj = input.readObject();
-         if (locksAtOriginObj == null) {
-            ddGt.setLocksHeldAtOrigin(emptySet());
-         } else {
-            ddGt.setLocksHeldAtOrigin((Set<Object>) locksAtOriginObj);
-         }
-         return ddGt;
-      }
+    public static class Externalizer extends GlobalTransaction.AbstractGlobalTxExternalizer<DldGlobalTransaction> {
 
-      @Override
-      public Integer getId() {
-         return Ids.DEADLOCK_DETECTING_GLOBAL_TRANSACTION;
-      }
+        @Override
+        protected DldGlobalTransaction createGlobalTransaction() {
+            return (DldGlobalTransaction) TransactionFactory.TxFactoryEnum.DLD_NORECOVERY_XA.newGlobalTransaction();
+        }
 
-      @Override
-      public Set<Class<? extends DldGlobalTransaction>> getTypeClasses() {
-         return Util.<Class<? extends DldGlobalTransaction>>asSet(DldGlobalTransaction.class);
-      }
-   }
+        @Override
+        public void writeObject(ObjectOutput output, DldGlobalTransaction ddGt) throws IOException {
+            super.writeObject(output, ddGt);
+            output.writeLong(ddGt.getCoinToss());
+            if (ddGt.locksAtOrigin.isEmpty()) {
+                output.writeObject(null);
+            } else {
+                output.writeObject(ddGt.locksAtOrigin);
+            }
+            if(ddGt.readLocksAtOrigin.isEmpty()) {
+                output.writeObject(null);
+            } else {
+                output.writeObject(ddGt.readLocksAtOrigin);
+            }
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public DldGlobalTransaction readObject(ObjectInput input) throws IOException, ClassNotFoundException {
+            DldGlobalTransaction ddGt = super.readObject(input);
+            ddGt.setCoinToss(input.readLong());
+            Object locksAtOriginObj = input.readObject();
+            Object readLockAtOriginObj = input.readObject();
+            if (locksAtOriginObj == null) {
+                ddGt.setLocksHeldAtOrigin(emptySet());
+            } else {
+                ddGt.setLocksHeldAtOrigin((Set<Object>) locksAtOriginObj);
+            }
+            if(readLockAtOriginObj == null) {
+                ddGt.setReadLocksHeldAtOrigin(emptySet());
+            } else {
+                ddGt.setReadLocksHeldAtOrigin((Set<Object>) readLockAtOriginObj);
+            }
+            return ddGt;
+        }
+
+        @Override
+        public Integer getId() {
+            return Ids.DEADLOCK_DETECTING_GLOBAL_TRANSACTION;
+        }
+
+        @Override
+        public Set<Class<? extends DldGlobalTransaction>> getTypeClasses() {
+            return Util.<Class<? extends DldGlobalTransaction>>asSet(DldGlobalTransaction.class);
+        }
+    }
 }
