@@ -17,8 +17,8 @@ public class InternalMVCCEntry {
         this.mostRecent = mostRecent;
     }
 
-    public InternalMVCCEntry(boolean mostRecent) {
-        this(null, null, mostRecent);
+    public InternalMVCCEntry(VersionVC visible, boolean mostRecent) {
+        this(null, visible, mostRecent);
     }
 
     public InternalCacheEntry getValue() {

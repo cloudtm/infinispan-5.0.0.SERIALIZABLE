@@ -46,7 +46,7 @@ public class VersionVC {
      * @param other vector clock to compare
      * @return true if *this* vector clock is less to the *other* vector clock
      */
-    public boolean isLess(VersionVC other) {
+    public boolean isLessThan(VersionVC other) {
         if(other == null || other.vectorClock.isEmpty() || this.vectorClock.isEmpty()) {
             return true;
         }
@@ -54,6 +54,20 @@ public class VersionVC {
         for(Map.Entry<Object, Long> entry : this.vectorClock.entrySet()) {
             Long otherValue = other.vectorClock.get(entry.getKey());
             if(otherValue != null && entry.getValue() >= otherValue) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public boolean isGreaterThan(VersionVC other) {
+        if(other == null || other.vectorClock.isEmpty() || this.vectorClock.isEmpty()) {
+            return true;
+        }
+
+        for(Map.Entry<Object, Long> entry : this.vectorClock.entrySet()) {
+            Long otherValue = other.vectorClock.get(entry.getKey());
+            if(otherValue != null && entry.getValue() <= otherValue) {
                 return false;
             }
         }
@@ -118,5 +132,16 @@ public class VersionVC {
     @Override
     public String toString() {
         return "Version{vc=" + vectorClock + "}";
+    }
+
+    public void incrementPositions(Object... positions) {
+        for(Object p : positions) {
+            Long value = vectorClock.get(p);
+            if(value != null) {
+                vectorClock.put(p, ++value);
+            } else {
+                vectorClock.put(p, 1L);
+            }
+        }
     }
 }

@@ -26,38 +26,25 @@ import org.infinispan.CacheException;
 import org.infinispan.commands.control.LockControlCommand;
 import org.infinispan.commands.read.GetKeyValueCommand;
 import org.infinispan.commands.tx.*;
-import org.infinispan.commands.write.ClearCommand;
-import org.infinispan.commands.write.EvictCommand;
-import org.infinispan.commands.write.InvalidateCommand;
-import org.infinispan.commands.write.InvalidateL1Command;
-import org.infinispan.commands.write.PutKeyValueCommand;
-import org.infinispan.commands.write.PutMapCommand;
-import org.infinispan.commands.write.RemoveCommand;
-import org.infinispan.commands.write.ReplaceCommand;
+import org.infinispan.commands.write.*;
 import org.infinispan.container.DataContainer;
 import org.infinispan.container.EntryFactory;
-import org.infinispan.container.MultiVersionDataContainer;
 import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.container.entries.InternalCacheEntry;
 import org.infinispan.container.entries.MVCCEntry;
-import org.infinispan.container.entries.SerializableEntry;
 import org.infinispan.context.Flag;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.factories.annotations.Start;
 import org.infinispan.interceptors.base.CommandInterceptor;
-import org.infinispan.mvcc.InternalMVCCEntry;
-import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.remoting.transport.Transport;
 import org.infinispan.transaction.xa.GlobalTransaction;
 import org.infinispan.util.ReversibleOrderedSet;
-import org.infinispan.util.Util;
 import org.infinispan.util.concurrent.IsolationLevel;
 import org.infinispan.util.concurrent.TimeoutException;
 import org.infinispan.util.concurrent.locks.LockManager;
-import org.infinispan.util.concurrent.locks.readwritelock.ReadWriteLockManager;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -99,7 +86,7 @@ public class LockingInterceptor extends CommandInterceptor {
             return invokeNextInterceptor(ctx, command);
         } finally {
             if (ctx.isInTxScope()) {
-                cleanupLocks(ctx, true, command.getCommitVersion());
+                cleanupLocks(ctx, true);
             } else {
                 throw new IllegalStateException("Attempting to do a commit or rollback but there is no transactional context in scope. " + ctx);
             }
@@ -112,7 +99,7 @@ public class LockingInterceptor extends CommandInterceptor {
             return invokeNextInterceptor(ctx, command);
         } finally {
             if (ctx.isInTxScope()) {
-                cleanupLocks(ctx, false, null);
+                cleanupLocks(ctx, false);
             } else {
                 throw new IllegalStateException("Attempting to do a commit or rollback but there is no transactional context in scope. " + ctx);
             }
@@ -134,43 +121,11 @@ public class LockingInterceptor extends CommandInterceptor {
             abortIfRemoteTransactionInvalid(ctx, command);
             return invokeNextInterceptor(ctx, command);
         } catch (TimeoutException te) {
-            cleanupLocks(ctx, false, null);
+            cleanupLocks(ctx, false);
             throw te;
         } finally {
             if (command.isOnePhaseCommit())
-                cleanupLocks(ctx, true, null); //serializable never has one phase commit
-        }
-    }
-
-    @Override
-    public Object visitAcquireValidationLocksCommand(TxInvocationContext ctx, AcquireValidationLocksCommand command) throws Throwable {
-        ReadWriteLockManager rwlman = (ReadWriteLockManager) lockManager;
-        try {
-            log.debugf("validate transaction [%s] write set %s",
-                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), command.getWriteSet());
-            for(Object k : command.getWriteSet()) {
-                rwlman.lockAndRecord(k, ctx);
-                if(!ctx.getLookedUpEntries().containsKey(k)) {
-                    ctx.putLookedUpEntry(k, null); //to release later
-                }
-            }
-
-            log.debugf("validate transaction [%s] read set %s",
-                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), command.getReadSet());
-            for(Object k : command.getReadSet()) {
-                rwlman.sharedLockAndRecord(k, ctx);
-                if(!ctx.getLookedUpEntries().containsKey(k)) {
-                    ctx.putLookedUpEntry(k, null); //same reason above (release later)
-                }
-                validateKey(k, command.getVersion());
-            }
-
-            return invokeNextInterceptor(ctx, command); //it does no need to passes down in the chain
-        } catch(Throwable t) {
-            rwlman.unlock(ctx);
-            log.debugf("validation of transaction [%s] fails %s",
-                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), t.getMessage());
-            throw t;
+                cleanupLocks(ctx, true);
         }
     }
 
@@ -183,20 +138,6 @@ public class LockingInterceptor extends CommandInterceptor {
             return invokeNextInterceptor(ctx, command);
         } finally {
             doAfterCall(ctx);
-            if(ctx.isInTxScope() && useSerializable) {
-                //update vc
-                InternalMVCCEntry ime = ((TxInvocationContext) ctx).getReadKey(command.getKey());
-                if(ime == null) {
-                    log.warn("InternalMVCCEntry is null.");
-                } else {
-                    if(((TxInvocationContext) ctx).hasModifications() && !ime.isMostRecent()) {
-                        throw new CacheException("transaction must abort!! read an old value and it is not a read only transaction");
-                        //read an old value... the tx will abort in commit,
-                        //so, do not waste time and abort it now
-                    }
-                    ((TxInvocationContext) ctx).updateVectorClock(ime.getVersion());
-                }
-            }
         }
     }
 
@@ -395,13 +336,13 @@ public class LockingInterceptor extends CommandInterceptor {
     private void doAfterCall(InvocationContext ctx) {
         // for non-transactional stuff.
         if (!ctx.isInTxScope()) {
-            cleanupLocks(ctx, true, null);
+            cleanupLocks(ctx, true);
         } else {
             if (trace) log.trace("Transactional.  Not cleaning up locks till the transaction ends.");
         }
     }
 
-    private void cleanupLocks(InvocationContext ctx, boolean commit, VersionVC commitVersion) {
+    private void cleanupLocks(InvocationContext ctx, boolean commit) {
         if (commit) {
             Object owner = ctx.getLockOwner();
             ReversibleOrderedSet<Map.Entry<Object, CacheEntry>> entries = ctx.getLookedUpEntries().entrySet();
@@ -414,11 +355,7 @@ public class LockingInterceptor extends CommandInterceptor {
                 boolean needToUnlock = lockManager.possiblyLocked(entry);
                 // could be null with read-committed
                 if (entry != null && entry.isChanged()) {
-                    if(commitVersion != null) {
-                        commitEntry(entry, ctx.hasFlag(Flag.SKIP_OWNERSHIP_CHECK), commitVersion);
-                    } else {
-                        commitEntry(entry, ctx.hasFlag(Flag.SKIP_OWNERSHIP_CHECK));
-                    }
+                    commitEntry(entry, ctx.hasFlag(Flag.SKIP_OWNERSHIP_CHECK));
                 } else {
                     if (trace) log.tracef("Entry for key %s is null, not calling commitUpdate", key);
                 }
@@ -429,33 +366,18 @@ public class LockingInterceptor extends CommandInterceptor {
                     lockManager.unlock(key);
                 }
             }
-            if(useSerializable) {
-                //commitVersion is null when the transaction is readonly
-                if(ctx.isInTxScope() && commitVersion != null) {
-                    ((MultiVersionDataContainer) dataContainer).addNewCommittedTransaction(commitVersion,0);
-                }
-                ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx); //this not call the entry.rollback() (instead of releaseLocks(ctx))
-            }
         } else {
             lockManager.releaseLocks(ctx);
         }
     }
 
     private Object cleanLocksAndRethrow(InvocationContext ctx, Throwable te) throws Throwable {
-        cleanupLocks(ctx, false, null);
+        cleanupLocks(ctx, false);
         throw te;
     }
 
     protected void commitEntry(CacheEntry entry, boolean force_commit) {
         entry.commit(dataContainer);
-    }
-
-    private void commitEntry(CacheEntry entry, boolean force_commit, VersionVC version) {
-        if(entry instanceof SerializableEntry) {
-            ((SerializableEntry) entry).commit(dataContainer, version);
-        } else {
-            entry.commit(dataContainer);
-        }
     }
 
     @Override
@@ -464,14 +386,14 @@ public class LockingInterceptor extends CommandInterceptor {
             abortIfRemoteTransactionInvalid(ctx, command);
             return invokeNextInterceptor(ctx, command);
         } catch (TimeoutException te) {
-            cleanupLocks(ctx, false, null);
+            cleanupLocks(ctx, false);
             throw te;
         } finally {
             if (command.isOnePhaseCommit()) {
                 if(ctx.isOriginLocal()) {
                     onlyReleaseLocks(ctx);
                 } else {
-                    cleanupLocks(ctx, true, null);
+                    cleanupLocks(ctx, true);
                 }
             }
         }
@@ -491,12 +413,6 @@ public class LockingInterceptor extends CommandInterceptor {
                 if (trace) log.tracef("Releasing lock on [%s] for owner %s", key, owner);
                 lockManager.unlock(key);
             }
-        }
-    }
-
-    protected void validateKey(Object key, VersionVC toCompare) {
-        if(!dataContainer.validateKey(key, 0, toCompare.get(0))) {
-            throw new CacheException("validation of key [" + key + "] failed!");
         }
     }
 }

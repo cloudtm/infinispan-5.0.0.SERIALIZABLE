@@ -28,6 +28,7 @@ import org.infinispan.factories.annotations.DefaultFactoryFor;
 import org.infinispan.factories.scopes.Scope;
 import org.infinispan.factories.scopes.Scopes;
 import org.infinispan.mvcc.CommitLog;
+import org.infinispan.mvcc.CommitQueue;
 import org.infinispan.remoting.InboundInvocationHandler;
 import org.infinispan.transaction.xa.TransactionFactory;
 import org.infinispan.util.Util;
@@ -40,7 +41,8 @@ import org.infinispan.util.Util;
  * @since 4.0
  */
 
-@DefaultFactoryFor(classes = {InboundInvocationHandler.class, RemoteCommandsFactory.class, TransactionFactory.class, L1Manager.class, CommitLog.class})
+@DefaultFactoryFor(classes = {InboundInvocationHandler.class, RemoteCommandsFactory.class, TransactionFactory.class,
+        L1Manager.class, CommitLog.class, CommitQueue.class})
 @Scope(Scopes.GLOBAL)
 public class EmptyConstructorFactory extends AbstractComponentFactory implements AutoInstantiableFactory {
    public <T> T construct(Class<T> componentType) {

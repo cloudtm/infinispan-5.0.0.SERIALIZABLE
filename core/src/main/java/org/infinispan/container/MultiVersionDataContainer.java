@@ -1,12 +1,11 @@
 package org.infinispan.container;
 
-import org.infinispan.Version;
 import org.infinispan.container.entries.InternalCacheEntry;
 import org.infinispan.container.entries.InternalEntryFactory;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.factories.annotations.Stop;
-import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.CommitLog;
+import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VBox;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.util.Immutables;
@@ -41,9 +40,9 @@ public class MultiVersionDataContainer implements DataContainer {
 
     private InternalMVCCEntry wrap(VBox vbox, VersionVC visible,  boolean mostRecent, boolean touch, boolean ignoreExpire) {
         if(vbox == null) {
-            return new InternalMVCCEntry(mostRecent);
+            return new InternalMVCCEntry(visible, mostRecent);
         } else if(mostRecent && vbox.isExpired() && !ignoreExpire) {
-            return new InternalMVCCEntry(mostRecent);
+            return new InternalMVCCEntry(visible, mostRecent);
         }
         return new InternalMVCCEntry(vbox.getValue(touch), visible, mostRecent);
     }
@@ -131,8 +130,9 @@ public class MultiVersionDataContainer implements DataContainer {
 
     @Override
     public InternalMVCCEntry get(Object k, VersionVC max) {
-        VBox vbox = getFromMap(k, max);
-        InternalMVCCEntry ime = wrap(vbox, commitLog.getMostRecentLessOrEqualThan(max), vbox == entries.get(k), true, false);
+        VersionVC visible = commitLog.getMostRecentLessOrEqualThan(max);
+        VBox vbox = getFromMap(k,visible);
+        InternalMVCCEntry ime = wrap(vbox, visible, vbox == entries.get(k), true, false);
         if(ime.getValue() == null) {
             entries.remove(k);
         }
@@ -143,8 +143,9 @@ public class MultiVersionDataContainer implements DataContainer {
 
     @Override
     public InternalMVCCEntry peek(Object k, VersionVC max) {
-        VBox vbox = getFromMap(k,max);
-        return wrap(vbox, commitLog.getMostRecentLessOrEqualThan(max), vbox == entries.get(k), false, true);
+        VersionVC visible = commitLog.getMostRecentLessOrEqualThan(max);
+        VBox vbox = getFromMap(k,visible);
+        return wrap(vbox, visible, vbox == entries.get(k), false, true);
     }
 
     @Override
@@ -171,7 +172,7 @@ public class MultiVersionDataContainer implements DataContainer {
             newVbox.updatedVersion();
         }
         log.debugf("added new value to key [%s] with version %s", k, newVbox.getVersion());
-        printVBox(newVbox);
+        //printVBox(newVbox);
     }
 
     @Override
@@ -273,9 +274,8 @@ public class MultiVersionDataContainer implements DataContainer {
         return new EntryIterator(new VBoxIterator(entries.values().iterator(), commitLog.getActualVersion()));
     }
 
-    public void addNewCommittedTransaction(VersionVC newVersion, int idx) {
-        commitLog.addNewVersion(newVersion, idx);
-        commitLog.commitLock.unlock();
+    public void addNewCommittedTransaction(VersionVC newVersion) {
+        commitLog.addNewVersion(newVersion);
     }
 
     @Override

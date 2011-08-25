@@ -30,7 +30,8 @@ import org.infinispan.config.CustomInterceptorConfig;
 import org.infinispan.factories.annotations.DefaultFactoryFor;
 import org.infinispan.interceptors.*;
 import org.infinispan.interceptors.base.CommandInterceptor;
-import org.infinispan.interceptors.serializable.SerialTxInterceptor;
+import org.infinispan.interceptors.SerialLockingInterceptor;
+import org.infinispan.interceptors.SerialTxInterceptor;
 import org.infinispan.loaders.CacheLoaderConfig;
 import org.infinispan.loaders.CacheStoreConfig;
 import org.infinispan.util.Util;
@@ -145,8 +146,13 @@ public class InterceptorChainFactory extends AbstractNamedCacheComponentFactory 
 
         if (configuration.getCacheMode().isDistributed())
             interceptorChain.appendInterceptor(createInterceptor(DistLockingInterceptor.class));
-        else
-            interceptorChain.appendInterceptor(createInterceptor(LockingInterceptor.class));
+        else {
+            if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
+                interceptorChain.appendInterceptor(createInterceptor(SerialLockingInterceptor.class));
+            } else {
+                interceptorChain.appendInterceptor(createInterceptor(LockingInterceptor.class));
+            }
+        }
 
         switch (configuration.getCacheMode()) {
             case REPL_SYNC:

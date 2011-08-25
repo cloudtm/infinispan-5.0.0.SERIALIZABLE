@@ -1,4 +1,4 @@
-package org.infinispan.interceptors.serializable;
+package org.infinispan.interceptors;
 
 import org.infinispan.CacheException;
 import org.infinispan.commands.CommandsFactory;
@@ -6,13 +6,11 @@ import org.infinispan.commands.read.GetKeyValueCommand;
 import org.infinispan.commands.tx.AcquireValidationLocksCommand;
 import org.infinispan.commands.tx.CommitCommand;
 import org.infinispan.commands.tx.PrepareCommand;
-import org.infinispan.commands.tx.RollbackCommand;
-import org.infinispan.container.DataContainer;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.factories.annotations.Inject;
-import org.infinispan.interceptors.TxInterceptor;
-import org.infinispan.mvcc.CommitLog;
+import org.infinispan.mvcc.CommitQueue;
+import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.util.Util;
 
@@ -24,12 +22,12 @@ import java.util.Set;
  */
 public class SerialTxInterceptor extends TxInterceptor {
     private CommandsFactory commandsFactory;
-    private CommitLog commitLog;
+    private CommitQueue commitQueue;
 
     @Inject
-    public void inject(CommandsFactory commandsFactory, CommitLog commitLog) {
+    public void inject(CommandsFactory commandsFactory, CommitQueue commitQueue) {
         this.commandsFactory = commandsFactory;
-        this.commitLog = commitLog;
+        this.commitQueue = commitQueue;
     }
 
     @Override
@@ -54,15 +52,17 @@ public class SerialTxInterceptor extends TxInterceptor {
 
         log.debugf("transaction [%s] passes validation",
                 Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
+
+        VersionVC commitVC = commitQueue.addTransaction(command.getGlobalTransaction(), ctx.calculateVersionToRead(), 0);
+
         //third (this is equals to old schemes) wrap the wrote entries
         //finally, process the rest of the command
-        super.visitPrepareCommand(ctx, command);
+        Object retVal = super.visitPrepareCommand(ctx, command);
 
-        //create commit version (not this is full replication or local mode)
-        commitLog.commitLock.lock();
-        long commitVersion = commitLog.getPrepareCounter();
-        VersionVC commitVC = new VersionVC();
-        commitVC.set(0, commitVersion);
+        if(retVal != null && retVal instanceof VersionVC) {
+            VersionVC othersCommitVC = (VersionVC) retVal;
+            commitVC.setToMaximum(othersCommitVC);
+        }
         ctx.setCommitVersion(commitVC);
 
         log.debugf("transaction [%s] commit vector clock is %s",
@@ -82,22 +82,23 @@ public class SerialTxInterceptor extends TxInterceptor {
     }
 
     @Override
-    public Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable {
-        Object retval = super.visitRollbackCommand(ctx, command);
-        try {
-            commitLog.commitLock.unlock();
-        } catch(Exception e) {
-            //no-op
-        }
-        return retval;
-    }
-
-    @Override
     public Object visitGetKeyValueCommand(InvocationContext ctx, GetKeyValueCommand command) throws Throwable {
         Object retval = super.visitGetKeyValueCommand(ctx, command);
         if(ctx.isInTxScope()) {
             ((TxInvocationContext) ctx).markReadFrom(0);
+            //update vc
+            InternalMVCCEntry ime = ((TxInvocationContext) ctx).getReadKey(command.getKey());
+            if(ime == null) {
+                log.warn("InternalMVCCEntry is null.");
+            } else if(((TxInvocationContext) ctx).hasModifications() && !ime.isMostRecent()) {
+                //read an old value... the tx will abort in commit,
+                //so, do not waste time and abort it now
+                throw new CacheException("transaction must abort!! read an old value and it is not a read only transaction");
+            } else {
+                ((TxInvocationContext) ctx).updateVectorClock(ime.getVersion());
+            }
         }
+
         return retval;
     }
 }
