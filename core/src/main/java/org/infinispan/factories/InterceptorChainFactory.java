@@ -157,7 +157,11 @@ public class InterceptorChainFactory extends AbstractNamedCacheComponentFactory 
         switch (configuration.getCacheMode()) {
             case REPL_SYNC:
             case REPL_ASYNC:
-                interceptorChain.appendInterceptor(createInterceptor(ReplicationInterceptor.class));
+                if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
+                    interceptorChain.appendInterceptor(createInterceptor(SerialReplicationInterceptor.class));
+                } else {
+                    interceptorChain.appendInterceptor(createInterceptor(ReplicationInterceptor.class));
+                }
                 break;
             case INVALIDATION_SYNC:
             case INVALIDATION_ASYNC:

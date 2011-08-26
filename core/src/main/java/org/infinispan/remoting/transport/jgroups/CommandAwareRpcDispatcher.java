@@ -227,6 +227,7 @@ public class CommandAwareRpcDispatcher extends RpcDispatcher {
             try {
                 buf = req_marshaller.objectToBuffer(command);
             } catch (Exception e) {
+                e.printStackTrace();
                 throw new RuntimeException("Failure to marshal argument(s)", e);
             }
             return buf;

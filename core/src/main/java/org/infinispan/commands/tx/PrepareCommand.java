@@ -163,7 +163,7 @@ public class PrepareCommand extends AbstractTransactionBoundaryCommand {
         retval[2] = onePhaseCommit;
         retval[3] = readSet;
         retval[4] = version;
-        retval[6] = numMods;
+        retval[5] = numMods;
         if (numMods > 0) System.arraycopy(modifications, 0, retval, 6, numMods);
         return retval;
     }

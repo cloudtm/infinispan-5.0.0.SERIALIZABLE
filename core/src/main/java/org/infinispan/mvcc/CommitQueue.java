@@ -6,6 +6,7 @@ import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
 
 import java.util.ArrayList;
+import java.util.ListIterator;
 
 /**
  * @author pedro
@@ -23,12 +24,15 @@ public class CommitQueue {
         commitQueue = new ArrayList<ListEntry>();
     }
 
-    private int searchInsertIndex(VersionVC vc) {
+    private int searchInsertIndex(int lastIdx, VersionVC vc) {
         if(commitQueue.isEmpty()) {
             return 0;
         }
-        int idx = 0;
-        for(ListEntry le : commitQueue) {
+        int idx = lastIdx;
+        ListIterator<ListEntry> lit = commitQueue.listIterator(lastIdx);
+        ListEntry le;
+        while(lit.hasNext()) {
+            le = lit.next();
             if(le.commitVC.isGreaterThan(vc)) {
                 return idx;
             }
@@ -45,7 +49,7 @@ public class CommitQueue {
      * @param positions the positions to be updated
      * @return the prepare vector clock
      */
-    public VersionVC addTransaction(GlobalTransaction gtx, VersionVC actualVectorClock, Object... positions) {
+    public VersionVC addTransaction(GlobalTransaction gtx, VersionVC actualVectorClock, Integer... positions) {
         synchronized (prepareVC) {
             prepareVC.setToMaximum(actualVectorClock);
             prepareVC.incrementPositions(positions);
@@ -54,7 +58,7 @@ public class CommitQueue {
             le.gtx = gtx;
             le.commitVC = prepared;
             synchronized (commitQueue) {
-                int idx = searchInsertIndex(prepared);
+                int idx = searchInsertIndex(0, prepared);
                 log.debugf("added to queue %s in position %s. queue is %s",
                         Util.prettyPrintGlobalTransaction(gtx), idx, commitQueue.toString());
                 commitQueue.add(idx, le);
@@ -87,7 +91,7 @@ public class CommitQueue {
             if(!commitVC.isEquals(le.commitVC)) {
                 commitQueue.remove(idx);
                 le.commitVC = commitVC;
-                idx = searchInsertIndex(commitVC);
+                idx = searchInsertIndex(idx, commitVC);
                 log.debugf("added to queue %s in position %s. queue is %s",
                         Util.prettyPrintGlobalTransaction(gtx), idx, commitQueue.toString());
                 commitQueue.add(idx, le);

@@ -60,12 +60,14 @@ public class SerialLockingInterceptor extends LockingInterceptor {
     @Override
     public Object visitAcquireValidationLocksCommand(TxInvocationContext ctx, AcquireValidationLocksCommand command) throws Throwable {
         ReadWriteLockManager rwlman = (ReadWriteLockManager) lockManager;
+        Object actualKeyInValidation = null;
         try {
             log.debugf("validate transaction [%s] write set %s",
                     Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), command.getWriteSet());
             for(Object k : command.getWriteSet()) {
                 rwlman.lockAndRecord(k, ctx);
                 if(!ctx.getLookedUpEntries().containsKey(k)) {
+                    actualKeyInValidation = k;
                     ctx.putLookedUpEntry(k, null); //to release later
                 }
             }
@@ -75,13 +77,19 @@ public class SerialLockingInterceptor extends LockingInterceptor {
             for(Object k : command.getReadSet()) {
                 rwlman.sharedLockAndRecord(k, ctx);
                 if(!ctx.getLookedUpEntries().containsKey(k)) {
+                    actualKeyInValidation = k;
                     ctx.putLookedUpEntry(k, null); //same reason above (release later)
                 }
                 validateKey(k, command.getVersion());
             }
 
+            actualKeyInValidation = null;
             return invokeNextInterceptor(ctx, command); //it does no need to passes down in the chain
         } catch(Throwable t) {
+            //if some exception occurs in mehtod putLookedUpEntry
+            if(actualKeyInValidation != null) {
+                rwlman.unlock(actualKeyInValidation);
+            }
             rwlman.unlock(ctx);
             log.debugf("validation of transaction [%s] fails %s",
                     Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), t.getMessage());

@@ -68,7 +68,7 @@ public class SerialTxInterceptor extends TxInterceptor {
         log.debugf("transaction [%s] commit vector clock is %s",
                 Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
                 commitVC);
-        return null;
+        return commitVC;
     }
 
     @Override
