@@ -6,7 +6,9 @@ import org.infinispan.commands.read.GetKeyValueCommand;
 import org.infinispan.commands.tx.AcquireValidationLocksCommand;
 import org.infinispan.commands.tx.CommitCommand;
 import org.infinispan.commands.tx.PrepareCommand;
+import org.infinispan.commands.tx.RollbackCommand;
 import org.infinispan.context.InvocationContext;
+import org.infinispan.context.InvocationContextContainer;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.mvcc.CommitQueue;
@@ -23,11 +25,13 @@ import java.util.Set;
 public class SerialTxInterceptor extends TxInterceptor {
     private CommandsFactory commandsFactory;
     private CommitQueue commitQueue;
+    private InvocationContextContainer icc;
 
     @Inject
-    public void inject(CommandsFactory commandsFactory, CommitQueue commitQueue) {
+    public void inject(CommandsFactory commandsFactory, CommitQueue commitQueue, InvocationContextContainer icc) {
         this.commandsFactory = commandsFactory;
         this.commitQueue = commitQueue;
+        this.icc = icc;
     }
 
     @Override
@@ -53,11 +57,12 @@ public class SerialTxInterceptor extends TxInterceptor {
         log.debugf("transaction [%s] passes validation",
                 Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
 
-        VersionVC commitVC = commitQueue.addTransaction(command.getGlobalTransaction(), ctx.calculateVersionToRead(), 0);
-
         //third (this is equals to old schemes) wrap the wrote entries
         //finally, process the rest of the command
         Object retVal = super.visitPrepareCommand(ctx, command);
+
+        VersionVC commitVC = commitQueue.addTransaction(command.getGlobalTransaction(), ctx.calculateVersionToRead(),
+                icc.getInvocationContext().clone(), 0);
 
         if(retVal != null && retVal instanceof VersionVC) {
             VersionVC othersCommitVC = (VersionVC) retVal;
@@ -73,12 +78,23 @@ public class SerialTxInterceptor extends TxInterceptor {
 
     @Override
     public Object visitCommitCommand(TxInvocationContext ctx, CommitCommand command) throws Throwable {
+        log.debugf("received commit command for %s", Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
         if(ctx.isInTxScope() && ctx.isOriginLocal() && !ctx.hasModifications()) {
             log.debugf("try commit a read-only transaction [%s]. returning...",
                     Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
             return null;
         }
+
+        log.warnf("looked up keys for %s are %s",
+                Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
+                ctx.getLookedUpEntries());
         return super.visitCommitCommand(ctx, command);
+    }
+
+    @Override
+    public Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable {
+        log.debugf("received rollback command for %s", Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
+        return super.visitRollbackCommand(ctx, command);
     }
 
     @Override

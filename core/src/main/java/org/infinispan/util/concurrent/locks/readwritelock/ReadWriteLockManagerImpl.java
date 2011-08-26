@@ -13,6 +13,7 @@ import org.infinispan.jmx.annotations.MBean;
 import org.infinispan.jmx.annotations.ManagedAttribute;
 import org.infinispan.transaction.xa.GlobalTransaction;
 import org.infinispan.util.ReversibleOrderedSet;
+import org.infinispan.util.Util;
 import org.infinispan.util.concurrent.locks.containers.readwritelock.*;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
@@ -172,6 +173,7 @@ public class ReadWriteLockManagerImpl implements ReadWriteLockManager {
 
     @Override
     public void unlock(Object key) {
+        log.warnf("write lock %s released", key);
         lockContainer.releaseLock(key);
     }
 
@@ -184,15 +186,22 @@ public class ReadWriteLockManagerImpl implements ReadWriteLockManager {
             while (it.hasNext()) {
                 Map.Entry<Object, CacheEntry> e = it.next();
                 CacheEntry entry = e.getValue();
-                if (possiblyLocked(entry)) {
-                    // has been locked!
-                    Object k = e.getKey();
-                    if (trace) log.tracef("Attempting to unlock %s", k);
 
-                    //first release the read lock and then the write lock... the lock acquisition is done
-                    //in the reverse order, ie, first the write and then the read.
+                // has been locked!
+                Object k = e.getKey();
+                if (trace) log.tracef("Attempting to unlock %s", k);
+
+                log.warnf("%s release the write and read lock over %s",
+                        ctx.getLockOwner(), k);
+                try {
                     lockContainer.releaseSharedLock(k);
+                } catch (IllegalMonitorStateException imse) {
+                    //no-op
+                }
+                try {
                     lockContainer.releaseLock(k);
+                } catch (IllegalMonitorStateException imse) {
+                    //no-op
                 }
             }
         }
@@ -249,22 +258,32 @@ public class ReadWriteLockManagerImpl implements ReadWriteLockManager {
             Map.Entry<Object, CacheEntry> e = it.next();
             CacheEntry entry = e.getValue();
             Object key = e.getKey();
-            boolean needToUnlock = possiblyLocked(entry);
             // could be null with read-committed
             if (entry != null && entry.isChanged()) {
                 entry.rollback();
             } else {
-                if (trace) log.tracef("Entry for key %s is null, not calling rollbackUpdate", key);
+                if (trace) log.tracef("Entry for key %s is null, not calling rollback()", key);
             }
             // and then unlock
-            if (needToUnlock) {
-                if (trace) log.tracef("Releasing lock on [%s] for owner %s", key, owner);
 
-                //first release the read lock and then the write lock... the lock acquisition is done
-                //in the reverse order, ie, first the write and then the read.
+            if (trace) log.tracef("Releasing lock on [%s] for owner %s", key, owner);
+
+            log.warnf("%s release the write and read lock over %s",
+                        owner, key);
+
+            //first release the read lock and then the write lock... the lock acquisition is done
+            //in the reverse order, ie, first the write and then the read.
+            try {
                 lockContainer.releaseSharedLock(key);
-                lockContainer.releaseLock(key);
+            } catch (IllegalMonitorStateException imse) {
+                //no-op
             }
+            try {
+                lockContainer.releaseLock(key);
+            } catch (IllegalMonitorStateException imse) {
+                //no-op
+            }
+
         }
     }
 
@@ -284,6 +303,9 @@ public class ReadWriteLockManagerImpl implements ReadWriteLockManager {
                 if (trace) {
                     log.tracef("Attempting to unlock %s", k);
                 }
+
+                log.warnf("%s release the write and read lock over %s",
+                        ctx.getLockOwner(), k);
 
                 //first release the read lock and then the write lock... the lock acquisition is done
                 //in the reverse order, ie, first the write and then the read.

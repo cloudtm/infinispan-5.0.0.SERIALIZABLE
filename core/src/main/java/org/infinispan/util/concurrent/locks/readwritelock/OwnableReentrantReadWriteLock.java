@@ -1,6 +1,8 @@
 package org.infinispan.util.concurrent.locks.readwritelock;
 
 import org.infinispan.context.InvocationContextContainer;
+import org.infinispan.util.logging.Log;
+import org.infinispan.util.logging.LogFactory;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -14,6 +16,8 @@ import java.util.concurrent.locks.ReadWriteLock;
  *         Date: 25-07-2011
  */
 public class OwnableReentrantReadWriteLock implements ReadWriteLock {
+    private static final Log log = LogFactory.getLog(OwnableReentrantReadWriteLock.class);
+
     private Map<Object, Integer> readers;
     private volatile Object writer;
     private int writeAccesses;
@@ -201,14 +205,12 @@ public class OwnableReentrantReadWriteLock implements ReadWriteLock {
 
     //------------ readers functions -------------------//
     private boolean canGrantReadAccess(Object req) {
-        if(writer == null) {
+        if(writer != null && writer.equals(req)) {
             return true;
-        } else if(writer.equals(req)) {
-            return true;
-        } else if(readers.containsKey(req)) {
-            return true;
+        } else if(writer != null) {
+            return false;
         }
-        return false;
+        return true;
     }
 
     private int getReadAccessCount(Object req) {
@@ -221,14 +223,13 @@ public class OwnableReentrantReadWriteLock implements ReadWriteLock {
     private boolean canGrantWriteAccess(Object req) {
         if(readers.size() == 1 && readers.containsKey(req)) {
             return true;
-        } else if(readers.isEmpty()) {
-            return true;
+        } else if(!readers.isEmpty()) {
+            return false;
         } else if(writer == null) {
             return true;
-        } else if(writer.equals(req)) {
-            return true;
         }
-        return false;
+
+        return writer.equals(req);
     }
 
     @Override

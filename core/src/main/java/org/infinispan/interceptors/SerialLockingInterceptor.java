@@ -23,7 +23,7 @@ import java.util.Map;
  * @author pedro
  *         Date: 25-08-2011
  */
-public class SerialLockingInterceptor extends LockingInterceptor {
+public class SerialLockingInterceptor extends LockingInterceptor implements CommitQueue.CommitInstance {
 
     private CommitQueue commitQueue;
 
@@ -40,9 +40,11 @@ public class SerialLockingInterceptor extends LockingInterceptor {
             if (ctx.isInTxScope()) {
                 try {
                     commitQueue.updateAndWait(command.getGlobalTransaction(), command.getCommitVersion());
-                    cleanupLocks(ctx, true, command.getCommitVersion());
-                    commitQueue.removeFirst();
-                } finally {
+                    if(ctx.isOriginLocal()) {
+                        cleanupLocks(ctx, true, command.getCommitVersion());
+                        commitQueue.removeFirst();
+                    }
+                } catch(Exception e) {
                     commitQueue.remove(command.getGlobalTransaction());
                 }
             } else {
@@ -54,7 +56,15 @@ public class SerialLockingInterceptor extends LockingInterceptor {
     @Override
     public Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable {
         commitQueue.remove(command.getGlobalTransaction());
-        return super.visitRollbackCommand(ctx, command);    //To change body of overridden methods use File | Settings | File Templates.
+        try {
+            return invokeNextInterceptor(ctx, command);
+        } finally {
+            if (ctx.isInTxScope()) {
+                cleanupLocks(ctx, false, null);
+            } else {
+                throw new IllegalStateException("Attempting to do a commit or rollback but there is no transactional context in scope. " + ctx);
+            }
+        }
     }
 
     @Override
@@ -137,5 +147,10 @@ public class SerialLockingInterceptor extends LockingInterceptor {
         } else {
             lockManager.releaseLocks(ctx);
         }
+    }
+
+    @Override
+    public void commit(InvocationContext ctx, VersionVC commitVersion) {
+        cleanupLocks(ctx, true, commitVersion);
     }
 }
