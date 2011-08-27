@@ -136,7 +136,7 @@ public class MultiVersionDataContainer implements DataContainer {
         if(ime.getValue() == null) {
             entries.remove(k);
         }
-        log.debugf("read key [%s] with max vector clock of %s. returned value is %s",
+        log.warnf("read key [%s] with max vector clock of %s. returned value is %s",
                 k, max, ime);
         return ime;
     }
@@ -158,7 +158,7 @@ public class MultiVersionDataContainer implements DataContainer {
         if(prev == null) {
             prev = entries.putIfAbsent(k, newVbox);
             if(prev == null) {
-                log.debugf("added new value to key [%s] with version %s", k, newVbox.getVersion());
+                log.warnf("added new value to key [%s] with version %s and value %s", k, newVbox.getVersion(), v);
                 return ;
             }
             //ops... maybe it exists now... lets replace it
@@ -171,8 +171,7 @@ public class MultiVersionDataContainer implements DataContainer {
             newVbox.setPrevious(prev);
             newVbox.updatedVersion();
         }
-        log.debugf("added new value to key [%s] with version %s", k, newVbox.getVersion());
-        //printVBox(newVbox);
+        log.warnf("added new value to key [%s] with version %s and value %s", k, newVbox.getVersion(), v);
     }
 
     @Override

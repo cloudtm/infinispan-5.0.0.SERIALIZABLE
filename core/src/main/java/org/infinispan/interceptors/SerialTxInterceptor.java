@@ -85,9 +85,9 @@ public class SerialTxInterceptor extends TxInterceptor {
             return null;
         }
 
-        log.warnf("looked up keys for %s are %s",
+        /*log.warnf("looked up keys for %s are %s",
                 Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
-                ctx.getLookedUpEntries());
+                ctx.getLookedUpEntries());*/
         return super.visitCommitCommand(ctx, command);
     }
 

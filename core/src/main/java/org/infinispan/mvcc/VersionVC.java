@@ -142,7 +142,7 @@ public class VersionVC implements Externalizable, Serializable {
         for(Integer p : positions) {
             Long value = vectorClock.get(p);
             if(value != null) {
-                vectorClock.put(p, ++value);
+                vectorClock.put(p, value + 1);
             } else {
                 vectorClock.put(p, 1L);
             }

@@ -39,9 +39,13 @@ public class SerialLockingInterceptor extends LockingInterceptor implements Comm
         } finally {
             if (ctx.isInTxScope()) {
                 try {
-                    commitQueue.updateAndWait(command.getGlobalTransaction(), command.getCommitVersion());
+                    boolean applied = commitQueue.updateAndWait(command.getGlobalTransaction(), command.getCommitVersion());
                     if(ctx.isOriginLocal()) {
-                        cleanupLocks(ctx, true, command.getCommitVersion());
+                        if(applied) {
+                            ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx);
+                        } else {
+                            cleanupLocks(ctx, true, command.getCommitVersion());
+                        }
                         commitQueue.removeFirst();
                     }
                 } catch(Exception e) {
@@ -150,7 +154,11 @@ public class SerialLockingInterceptor extends LockingInterceptor implements Comm
     }
 
     @Override
-    public void commit(InvocationContext ctx, VersionVC commitVersion) {
-        cleanupLocks(ctx, true, commitVersion);
+    public void commit(InvocationContext ctx, VersionVC commitVersion, boolean applied) {
+        if(applied) {
+            ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx);
+        } else {
+            cleanupLocks(ctx, true, commitVersion);
+        }
     }
 }

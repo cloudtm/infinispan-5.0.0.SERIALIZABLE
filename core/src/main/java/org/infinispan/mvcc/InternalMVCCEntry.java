@@ -35,7 +35,7 @@ public class InternalMVCCEntry {
 
     @Override
     public String toString() {
-        return new StringBuilder("{InternalMVCCEntry")
+        return new StringBuilder("InternalMVCCEntry{")
                 .append(" value=").append(value)
                 .append(",version=").append(visible)
                 .append(",mostRecent?=").append(mostRecent)

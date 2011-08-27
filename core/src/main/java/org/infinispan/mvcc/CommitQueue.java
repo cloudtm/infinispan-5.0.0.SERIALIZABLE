@@ -105,9 +105,8 @@ public class CommitQueue {
             ListEntry le = new ListEntry();
             le.gtx = gtx;
             le.commitVC = prepared;
-            if(gtx.isRemote()) {
-                le.ctx = ctx;
-            }
+            le.ctx = ctx;
+
             synchronized (commitQueue) {
                 int idx = searchInsertIndex(prepared);
                 log.debugf("added to queue %s in position %s. queue is %s",
@@ -119,6 +118,7 @@ public class CommitQueue {
         }
     }
 
+
     /**
      * updates the position on the queue, mark the transaction as ready to commit and puts the final vector clock
      * (commit vector clock).
@@ -127,9 +127,12 @@ public class CommitQueue {
      * @param gtx the transaction identifier
      * @param commitVC the commit vector clock
      * @throws InterruptedException if it is interrupted
+     * @return true if the modification was already applied
      */
-    @SuppressWarnings({"SuspiciousMethodCalls"})
-    public void updateAndWait(GlobalTransaction gtx, VersionVC commitVC) throws InterruptedException {
+    public boolean updateAndWait(GlobalTransaction gtx, VersionVC commitVC) throws InterruptedException {
+        log.warnf("update and wait gtx=%s, commitVC=%s",
+                Util.prettyPrintGlobalTransaction(gtx), commitVC);
+
         synchronized (prepareVC) {
             prepareVC.setToMaximum(commitVC);
             log.debugf("update transaction %s and prepareVC %s",
@@ -147,23 +150,56 @@ public class CommitQueue {
                 le.commitVC = commitVC;
                 idx = searchInsertIndex(commitVC);
                 commitQueue.add(idx, le);
-                commitQueue.notifyAll();
             }
 
             log.debugf("update transaction %s and index is %s",
                     Util.prettyPrintGlobalTransaction(gtx),
                     idx);
 
+            le.ready = true;
+            commitQueue.notifyAll();
+
             if(le.gtx.isRemote()) {
-                le.ready = true;
-                commitQueue.notifyAll();
-                return; //don't wait
+                log.warnf("transaction is remote. queue is %s and idx is %s", commitQueue, idx);
+                return false; //don't wait (don't care about the return value)
             }
-            while(idx != 0) {
-                log.debugf("wait for my turn... I'm %s and queue state is %s",
-                        Util.prettyPrintGlobalTransaction(gtx), commitQueue.toString());
-                commitQueue.wait();
-                idx = commitQueue.indexOf(toSearch);
+
+            while(true) {
+
+                if(idx != 0) {
+                    log.debugf("wait for my turn... I'm %s and queue state is %s",
+                            Util.prettyPrintGlobalTransaction(gtx), commitQueue.toString());
+                    commitQueue.wait();
+                    idx = commitQueue.indexOf(toSearch);
+                }
+
+                log.warnf("check my status... queue is %s, my idx is %s",
+                        commitQueue, idx);
+
+                if(idx == 0 && commitQueue.size() > 1) {
+                    ListEntry other = commitQueue.get(1);
+                    log.warnf("compare entries %s vs %s", le, other);
+                    if(other.commitVC.isEquals(le.commitVC)) {
+                        //both has the same commit vector clock... we need to wrap this transaction in one
+                        if(!other.ready) {
+                            log.warnf("compare entries %s vs %s ==> same vector clock, but other is not ready",
+                                    le, other);
+                            idx = -1; //other is not ready... the vector clock can change. we must sure
+                            // if they are different or not
+                        } else {
+                            //the other is ready and with the same vector clock... grab the modification and join to
+                            //this transaction
+                            le.ctx.putLookedUpEntries(other.ctx.getLookedUpEntries());
+                            other.applied = true;
+                            log.warnf("compare entries %s vs %s ==> same vector clock, and other is ready",
+                                    le, other);
+                        }
+                    }
+                }
+
+                if(idx == 0) {
+                    return le.applied;
+                }
             }
         }
 
@@ -191,7 +227,7 @@ public class CommitQueue {
      */
     public void removeFirst() {
         synchronized (commitQueue) {
-            log.debugf("remove first. queue is %s",commitQueue.toString());
+            log.warnf("remove first. queue is %s", commitQueue.toString());
             commitQueue.remove(0);
             commitQueue.notifyAll();
         }
@@ -212,6 +248,7 @@ public class CommitQueue {
         private VersionVC commitVC;
         private InvocationContext ctx;
         private volatile boolean ready = false;
+        private volatile boolean applied = false;
 
         @Override
         public boolean equals(Object o) {
@@ -234,7 +271,7 @@ public class CommitQueue {
         @Override
         public String toString() {
             return "ListEntry{gtx=" + Util.prettyPrintGlobalTransaction(gtx) + ",commitVC=" + commitVC + ",ctx=" +
-                    ctx +"}";
+                    ctx + ",ready?=" + ready + ",applied?=" + applied + "}";
         }
     }
 
@@ -250,24 +287,28 @@ public class CommitQueue {
             run = true;
             while(run) {
                 try {
+                    ListEntry le;
                     synchronized (commitQueue) {
                         if(commitQueue.isEmpty()) {
                             commitQueue.wait();
                             continue;
                         }
-                        ListEntry le = commitQueue.get(0);
+                        le = commitQueue.get(0);
                         if(!le.gtx.isRemote() || !le.ready) {
                             commitQueue.wait();
                             continue;
                         }
-                        try {
-                            icc.resume(le.ctx);
-                            log.warnf("commit thread... looked up keys are %s", le.ctx.getLookedUpEntries());
-                            commitInvocationInstance.commit(le.ctx, le.commitVC);
-                        } finally {
-                            icc.suspend();
-                            removeFirst();
-                        }
+
+                        log.warnf("commit remote modifications. queue is %s", commitQueue);
+                    }
+
+                    try {
+                        icc.resume(le.ctx);
+                        //log.warnf("commit thread... looked up keys are %s", le.ctx.getLookedUpEntries());
+                        commitInvocationInstance.commit(le.ctx, le.commitVC, le.applied);
+                    } finally {
+                        icc.suspend();
+                        removeFirst();
                     }
                 } catch (InterruptedException e) {
                     //no-op
@@ -285,6 +326,6 @@ public class CommitQueue {
     }
 
     public static interface CommitInstance {
-        void commit(InvocationContext ctx, VersionVC commitVersion);
+        void commit(InvocationContext ctx, VersionVC commitVersion, boolean applied);
     }
 }
