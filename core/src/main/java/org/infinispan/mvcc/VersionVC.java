@@ -2,7 +2,9 @@ package org.infinispan.mvcc;
 
 import java.io.*;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * @author pedro
@@ -12,8 +14,7 @@ public class VersionVC implements Externalizable, Serializable {
     public static transient final long EMPTY_POSITION = -1;
     public static transient final VersionVC EMPTY_VERSION = new VersionVC();
 
-
-    private Map<Integer,Long> vectorClock;
+    protected Map<Integer,Long> vectorClock;
 
     public VersionVC() {
         vectorClock = new HashMap<Integer, Long>();
@@ -27,14 +28,17 @@ public class VersionVC implements Externalizable, Serializable {
      * @return true if *this* vector clock is less or equals to the *other* vector clock
      */
     public boolean isLessOrEquals(VersionVC other) {
-        if(other == null || other.vectorClock.isEmpty() || this.vectorClock.isEmpty()) {
+        if(other == null) {
             return true;
         }
 
-        for(Map.Entry<Integer, Long> entry : this.vectorClock.entrySet()) {
-            Long otherValue = other.vectorClock.get(entry.getKey());
-            Long myValue = entry.getValue();
-            if(otherValue != null && myValue != null && myValue > otherValue) {
+        Set<Integer> keySet = new HashSet<Integer>(other.vectorClock.keySet());
+        keySet.addAll(this.vectorClock.keySet());
+
+        for(Integer pos : keySet) {
+            long otherValue = other.get(pos);
+            long myValue = this.get(pos);
+            if(otherValue != EMPTY_POSITION && myValue != EMPTY_POSITION && myValue > otherValue) {
                 return false;
             }
         }
@@ -49,14 +53,17 @@ public class VersionVC implements Externalizable, Serializable {
      * @return true if *this* vector clock is less to the *other* vector clock
      */
     public boolean isLessThan(VersionVC other) {
-        if(other == null || other.vectorClock.isEmpty() || this.vectorClock.isEmpty()) {
+        if(other == null) {
             return true;
         }
 
-        for(Map.Entry<Integer, Long> entry : this.vectorClock.entrySet()) {
-            Long otherValue = other.vectorClock.get(entry.getKey());
-            Long myValue = entry.getValue();
-            if(otherValue != null && myValue != null && myValue >= otherValue) {
+        Set<Integer> keySet = new HashSet<Integer>(other.vectorClock.keySet());
+        keySet.addAll(this.vectorClock.keySet());
+
+        for(Integer pos : keySet) {
+            long otherValue = other.get(pos);
+            long myValue = this.get(pos);
+            if(otherValue != EMPTY_POSITION && myValue != EMPTY_POSITION && myValue >= otherValue) {
                 return false;
             }
         }
@@ -64,14 +71,17 @@ public class VersionVC implements Externalizable, Serializable {
     }
 
     public boolean isGreaterThan(VersionVC other) {
-        if(other == null || other.vectorClock.isEmpty() || this.vectorClock.isEmpty()) {
+        if(other == null) {
             return true;
         }
 
-        for(Map.Entry<Integer, Long> entry : this.vectorClock.entrySet()) {
-            Long otherValue = other.vectorClock.get(entry.getKey());
-            Long myValue = entry.getValue();
-            if(otherValue != null && myValue != null && myValue <= otherValue) {
+        Set<Integer> keySet = new HashSet<Integer>(other.vectorClock.keySet());
+        keySet.addAll(this.vectorClock.keySet());
+
+        for(Integer pos : keySet) {
+            long otherValue = other.get(pos);
+            long myValue = this.get(pos);
+            if(otherValue != EMPTY_POSITION && myValue != EMPTY_POSITION && myValue <= otherValue) {
                 return false;
             }
         }
@@ -86,14 +96,17 @@ public class VersionVC implements Externalizable, Serializable {
      * @return true if *this* vector clock is equals to the *other* vector clock
      */
     public boolean isEquals(VersionVC other) {
-        if(other == null || other.vectorClock.isEmpty() || this.vectorClock.isEmpty()) {
+        if(other == null) {
             return true;
         }
 
-        for(Map.Entry<Integer, Long> entry : this.vectorClock.entrySet()) {
-            Long otherValue = other.vectorClock.get(entry.getKey());
-            Long myValue = entry.getValue();
-            if(otherValue != null && myValue != null && myValue.longValue() != otherValue.longValue()) {
+        Set<Integer> keySet = new HashSet<Integer>(other.vectorClock.keySet());
+        keySet.addAll(this.vectorClock.keySet());
+
+        for(Integer pos : keySet) {
+            long otherValue = other.get(pos);
+            long myValue = this.get(pos);
+            if(otherValue != EMPTY_POSITION && myValue != EMPTY_POSITION && myValue != otherValue) {
                 return false;
             }
         }
@@ -102,7 +115,7 @@ public class VersionVC implements Externalizable, Serializable {
 
     public long get(Integer position) {
         Long l = vectorClock.get(position);
-        return l != null ? l : -1;
+        return l != null ? l : EMPTY_POSITION;
     }
 
     public void set(Integer position, long value) {

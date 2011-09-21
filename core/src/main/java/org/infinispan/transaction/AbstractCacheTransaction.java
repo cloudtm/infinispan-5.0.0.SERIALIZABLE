@@ -122,7 +122,10 @@ public abstract class AbstractCacheTransaction implements CacheTransaction {
     }
 
     public void initVectorClock(VersionVC vc) {
-        vectorClock = vc.copy();
+        if(vectorClock == null) {
+            vectorClock = new VersionVC();
+        }
+        vectorClock.setToMaximum(vc);
     }
 
     public void updateVectorClock(VersionVC other) {

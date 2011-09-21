@@ -111,7 +111,11 @@ public class SerialTxInterceptor extends TxInterceptor {
                 //so, do not waste time and abort it now
                 throw new CacheException("transaction must abort!! read an old value and it is not a read only transaction");
             } else {
-                ((TxInvocationContext) ctx).updateVectorClock(ime.getVersion());
+                VersionVC v = ime.getVersion();
+                if(v.get(0) == VersionVC.EMPTY_POSITION) {
+                    v.set(0,0);
+                }
+                ((TxInvocationContext) ctx).updateVectorClock(v);
             }
         }
 
