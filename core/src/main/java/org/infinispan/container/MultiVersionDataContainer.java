@@ -279,7 +279,6 @@ public class MultiVersionDataContainer implements DataContainer {
 
     @Override
     public boolean validateKey(Object key, int idx, long value) {
-
         VBox actual = entries.get(key);
         if(actual == null) {
             log.debugf("validate key [%s], but it is null in data container. return true", key);

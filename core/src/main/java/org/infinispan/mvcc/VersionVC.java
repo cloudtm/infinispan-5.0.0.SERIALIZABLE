@@ -33,7 +33,8 @@ public class VersionVC implements Externalizable, Serializable {
 
         for(Map.Entry<Integer, Long> entry : this.vectorClock.entrySet()) {
             Long otherValue = other.vectorClock.get(entry.getKey());
-            if(otherValue != null && entry.getValue() > otherValue) {
+            Long myValue = entry.getValue();
+            if(otherValue != null && myValue != null && myValue > otherValue) {
                 return false;
             }
         }
@@ -54,7 +55,8 @@ public class VersionVC implements Externalizable, Serializable {
 
         for(Map.Entry<Integer, Long> entry : this.vectorClock.entrySet()) {
             Long otherValue = other.vectorClock.get(entry.getKey());
-            if(otherValue != null && entry.getValue() >= otherValue) {
+            Long myValue = entry.getValue();
+            if(otherValue != null && myValue != null && myValue >= otherValue) {
                 return false;
             }
         }
@@ -68,7 +70,8 @@ public class VersionVC implements Externalizable, Serializable {
 
         for(Map.Entry<Integer, Long> entry : this.vectorClock.entrySet()) {
             Long otherValue = other.vectorClock.get(entry.getKey());
-            if(otherValue != null && entry.getValue() <= otherValue) {
+            Long myValue = entry.getValue();
+            if(otherValue != null && myValue != null && myValue <= otherValue) {
                 return false;
             }
         }
@@ -89,7 +92,8 @@ public class VersionVC implements Externalizable, Serializable {
 
         for(Map.Entry<Integer, Long> entry : this.vectorClock.entrySet()) {
             Long otherValue = other.vectorClock.get(entry.getKey());
-            if(otherValue != null && entry.getValue().longValue() != otherValue.longValue()) {
+            Long myValue = entry.getValue();
+            if(otherValue != null && myValue != null && myValue.longValue() != otherValue.longValue()) {
                 return false;
             }
         }
