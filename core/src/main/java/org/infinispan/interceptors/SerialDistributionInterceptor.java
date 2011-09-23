@@ -2,6 +2,7 @@ package org.infinispan.interceptors;
 
 import org.infinispan.CacheException;
 import org.infinispan.commands.tx.PrepareCommand;
+import org.infinispan.context.impl.LocalTxInvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.responses.ExceptionResponse;
@@ -9,22 +10,43 @@ import org.infinispan.remoting.responses.Response;
 import org.infinispan.remoting.responses.SuccessfulResponse;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.util.Util;
+import org.infinispan.util.concurrent.NotifyingNotifiableFuture;
 
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
- * @author pedro
- *         Date: 26-08-2011
+ * @author pruivo
+ *         Date: 23/09/11
  */
-public class SerialReplicationInterceptor extends ReplicationInterceptor {
+public class SerialDistributionInterceptor extends DistributionInterceptor {
 
     @Override
     public Object visitPrepareCommand(TxInvocationContext ctx, PrepareCommand command) throws Throwable {
         Object retVal = invokeNextInterceptor(ctx, command);
+
         if (shouldInvokeRemoteTxCommand(ctx)) {
-            //meaning: broadcast to everybody, in sync mode (we need the others vector clock) without
-            //replication queue
-            Map<Address, Response> responses = rpcManager.invokeRemotely(null, command, true, false);
+
+            //obtain all keys (read and write set)
+            Set<Object> allKeys = new HashSet<Object>(ctx.getAffectedKeys());
+            allKeys.addAll(command.getReadSet());
+
+            //get the member to contact
+            List<Address> recipients = dm.getAffectedNodes(allKeys);
+
+            //something about L1 cache
+            NotifyingNotifiableFuture<Object> f = null;
+            if (isL1CacheEnabled && command.isOnePhaseCommit()) {
+                f = l1Manager.flushCache(ctx.getLockedKeys(), null, null);
+            }
+
+            //send the command and wait for the vector clocks
+            Map<Address, Response> responses = rpcManager.invokeRemotely(recipients, command, true, false);
+            //something...
+            ((LocalTxInvocationContext) ctx).remoteLocksAcquired(recipients);
+
             log.debugf("broadcast prepare command for transaction %s. responses are: %s",
                     Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
                     responses.toString());
@@ -51,7 +73,14 @@ public class SerialReplicationInterceptor extends ReplicationInterceptor {
                                 Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
                     }
                 }
+
+                //this has the maximum vector clock of all
                 retVal = allPreparedVC;
+            }
+
+
+            if (f != null) {
+                f.get();
             }
         }
         return retVal;

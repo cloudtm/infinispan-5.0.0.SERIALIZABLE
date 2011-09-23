@@ -72,6 +72,7 @@ public class InterceptorChainFactory extends AbstractNamedCacheComponentFactory 
 
     public InterceptorChain buildInterceptorChain() throws IllegalAccessException, InstantiationException, ClassNotFoundException {
         boolean invocationBatching = configuration.isInvocationBatchingEnabled();
+        boolean serializability = configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE;
         // load the icInterceptor first
 
         CommandInterceptor first = invocationBatching ? createInterceptor(BatchingInterceptor.class) : createInterceptor(InvocationContextInterceptor.class);
@@ -104,9 +105,13 @@ public class InterceptorChainFactory extends AbstractNamedCacheComponentFactory 
 
         // load the tx interceptor
         if (configuration.getCacheMode().isDistributed()) {
-            interceptorChain.appendInterceptor(createInterceptor(DistTxInterceptor.class));
+            if(serializability) {
+                interceptorChain.appendInterceptor(createInterceptor(SerialDistTxInterceptor.class));
+            } else {
+                interceptorChain.appendInterceptor(createInterceptor(DistTxInterceptor.class));
+            }
         } else {
-            if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
+            if(serializability) {
                 interceptorChain.appendInterceptor(createInterceptor(SerialTxInterceptor.class));
             } else {
                 interceptorChain.appendInterceptor(createInterceptor(TxInterceptor.class));
@@ -144,10 +149,14 @@ public class InterceptorChainFactory extends AbstractNamedCacheComponentFactory 
         }
 
 
-        if (configuration.getCacheMode().isDistributed())
-            interceptorChain.appendInterceptor(createInterceptor(DistLockingInterceptor.class));
-        else {
-            if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
+        if (configuration.getCacheMode().isDistributed()) {
+            if(serializability) {
+                interceptorChain.appendInterceptor(createInterceptor(SerialDistLockingInterceptor.class));
+            } else {
+                interceptorChain.appendInterceptor(createInterceptor(DistLockingInterceptor.class));
+            }
+        } else {
+            if(serializability) {
                 interceptorChain.appendInterceptor(createInterceptor(SerialLockingInterceptor.class));
             } else {
                 interceptorChain.appendInterceptor(createInterceptor(LockingInterceptor.class));
@@ -157,7 +166,7 @@ public class InterceptorChainFactory extends AbstractNamedCacheComponentFactory 
         switch (configuration.getCacheMode()) {
             case REPL_SYNC:
             case REPL_ASYNC:
-                if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
+                if(serializability) {
                     interceptorChain.appendInterceptor(createInterceptor(SerialReplicationInterceptor.class));
                 } else {
                     interceptorChain.appendInterceptor(createInterceptor(ReplicationInterceptor.class));
@@ -169,7 +178,11 @@ public class InterceptorChainFactory extends AbstractNamedCacheComponentFactory 
                 break;
             case DIST_SYNC:
             case DIST_ASYNC:
-                interceptorChain.appendInterceptor(createInterceptor(DistributionInterceptor.class));
+                if(serializability) {
+                    interceptorChain.appendInterceptor(createInterceptor(SerialDistributionInterceptor.class));
+                } else {
+                    interceptorChain.appendInterceptor(createInterceptor(DistributionInterceptor.class));
+                }
                 break;
             case LOCAL:
                 //Nothing...

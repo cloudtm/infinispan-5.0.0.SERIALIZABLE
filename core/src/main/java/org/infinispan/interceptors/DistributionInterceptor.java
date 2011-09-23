@@ -139,8 +139,8 @@ public class DistributionInterceptor extends BaseRpcInterceptor {
         // available.  It could just have been removed in the same tx beforehand.
         if (needsRemoteGet(ctx, command.getKey(), returnValue == null)) {
             returnValue = remoteGetAndStoreInL1(ctx, command.getKey(), isRehashInProgress, false);
-        } else {
-            int idx = (int) dm.locateGroup(key).getId();
+        } else if(ctx.isInTxScope()) {
+            int idx = dm.locateGroup(key).getId();
             ((TxInvocationContext) ctx).markReadFrom(idx);
         }
 

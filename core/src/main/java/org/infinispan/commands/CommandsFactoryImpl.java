@@ -51,6 +51,7 @@ import org.infinispan.factories.annotations.ComponentName;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.factories.annotations.Start;
 import org.infinispan.interceptors.InterceptorChain;
+import org.infinispan.mvcc.CommitLog;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.notifications.cachelistener.CacheNotifier;
 import org.infinispan.remoting.transport.Address;
@@ -100,13 +101,14 @@ public class CommandsFactoryImpl implements CommandsFactory {
     private RecoveryManager recoveryManager;
 
     private Map<Byte, ModuleCommandInitializer> moduleCommandInitializers;
+    private CommitLog commitLog;
 
     @Inject
     public void setupDependencies(DataContainer container, CacheNotifier notifier, Cache cache,
                                   InterceptorChain interceptorChain, DistributionManager distributionManager,
                                   InvocationContextContainer icc, TransactionTable txTable, Configuration configuration,
                                   @ComponentName(KnownComponentNames.MODULE_COMMAND_INITIALIZERS) Map<Byte, ModuleCommandInitializer> moduleCommandInitializers,
-                                  RecoveryManager recoveryManager) {
+                                  RecoveryManager recoveryManager, CommitLog commitLog) {
         this.dataContainer = container;
         this.notifier = notifier;
         this.cache = cache;
@@ -117,6 +119,7 @@ public class CommandsFactoryImpl implements CommandsFactory {
         this.configuration = configuration;
         this.moduleCommandInitializers = moduleCommandInitializers;
         this.recoveryManager = recoveryManager;
+        this.commitLog = commitLog;
     }
 
     @Start(priority = 1)
@@ -312,7 +315,7 @@ public class CommandsFactoryImpl implements CommandsFactory {
                 break;
             case ClusteredGetCommand.COMMAND_ID:
                 ClusteredGetCommand clusteredGetCommand = (ClusteredGetCommand) c;
-                clusteredGetCommand.initialize(icc, this, interceptorChain, distributionManager);
+                clusteredGetCommand.initialize(icc, this, interceptorChain, distributionManager, commitLog);
                 break;
             case LockControlCommand.COMMAND_ID:
                 LockControlCommand lcc = (LockControlCommand) c;

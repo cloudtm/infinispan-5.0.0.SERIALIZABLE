@@ -31,6 +31,8 @@ import java.util.Set;
 import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.context.Flag;
 import org.infinispan.context.InvocationContext;
+import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.transport.Address;
 
 /**
@@ -190,4 +192,24 @@ public abstract class AbstractInvocationContext implements InvocationContext {
             "flags=" + flags +
             '}';
    }
+
+    @Override
+    public boolean readBasedOnVersion() {
+        return false;
+    }
+
+    @Override
+    public VersionVC calculateVersionToRead() {
+        return null;
+    }
+
+    @Override
+    public InternalMVCCEntry getReadKey(Object Key) {
+        return null;
+    }
+
+    @Override
+    public void addReadKey(Object key, InternalMVCCEntry ime) {
+        //no-op by default
+    }
 }

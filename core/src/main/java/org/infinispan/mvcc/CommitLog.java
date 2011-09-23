@@ -1,6 +1,7 @@
 package org.infinispan.mvcc;
 
 
+import org.infinispan.Version;
 import org.infinispan.factories.annotations.Start;
 import org.infinispan.factories.annotations.Stop;
 import org.infinispan.util.logging.Log;
@@ -17,6 +18,7 @@ public class CommitLog {
 
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private VersionEntry actual;
+    private final Object versionChangeNotifier = new Object();
 
     public CommitLog() {
         actual = new VersionEntry();
@@ -70,11 +72,41 @@ public class CommitLog {
             ve.version = other;
             ve.previous = actual;
             actual = ve;
+            synchronized (versionChangeNotifier) {
+                versionChangeNotifier.notifyAll();
+            }
         } finally {
             log.debugf("added new version to commit log. actual version is %s",
                     actual.version);
             lock.writeLock().unlock();
         }
+    }
+
+    /**
+     *
+     * @param minVersion minimum version
+     * @param position minimum version in this position of the vector clock
+     * @param timeout timeout in milliseconds
+     * @return true if the value is available, false otherwise (timeout)
+     * @throws InterruptedException if interrupted
+     */
+    public boolean waitUntilMinVersionIsGuaranteed(long minVersion, int position, long timeout) throws InterruptedException {
+        if(minVersion == 0) {
+            return true;
+        }
+
+        long finalTimeout = System.currentTimeMillis() + timeout;
+        do {
+            VersionVC version = getActualVersion();
+            if(version.get(position) >= minVersion) {
+                return true;
+            }
+            synchronized (versionChangeNotifier) {
+                versionChangeNotifier.wait(finalTimeout - System.currentTimeMillis());
+            }
+        } while(System.currentTimeMillis() < finalTimeout);
+        VersionVC version = getActualVersion();
+        return version.get(position) >= minVersion;
     }
 
     private static class VersionEntry {

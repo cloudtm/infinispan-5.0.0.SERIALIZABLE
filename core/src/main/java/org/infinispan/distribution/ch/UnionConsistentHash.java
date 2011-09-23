@@ -110,7 +110,7 @@ public class UnionConsistentHash extends AbstractConsistentHash {
     public ReplGroup getGroupFor(Object key, int replCount) {
         List<Address> addrs = locate(key, replCount);
         List<Address> candidates = new LinkedList<Address>(caches);
-        long id = candidates.indexOf(addrs.get(0));
+        int id = candidates.indexOf(addrs.get(0));
         return new ReplGroup(id, addrs);
     }
 

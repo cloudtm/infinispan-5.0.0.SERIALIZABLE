@@ -33,8 +33,12 @@ import org.infinispan.container.entries.MVCCEntry;
 import org.infinispan.context.Flag;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.context.InvocationContextContainer;
+import org.infinispan.context.impl.NonTxInvocationContext;
 import org.infinispan.distribution.DistributionManager;
 import org.infinispan.interceptors.InterceptorChain;
+import org.infinispan.mvcc.CommitLog;
+import org.infinispan.mvcc.VersionVC;
+import org.infinispan.util.concurrent.IsolationLevel;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
 
@@ -52,130 +56,183 @@ import java.util.Set;
  */
 public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedCommand {
 
-   public static final byte COMMAND_ID = 16;
-   private static final Log log = LogFactory.getLog(ClusteredGetCommand.class);
-   private static final boolean trace = log.isTraceEnabled();
+    public static final byte COMMAND_ID = 16;
+    private static final Log log = LogFactory.getLog(ClusteredGetCommand.class);
+    private static final boolean trace = log.isTraceEnabled();
 
-   private Object key;
+    private Object key;
 
-   private InvocationContextContainer icc;
-   private CommandsFactory commandsFactory;
-   private InterceptorChain invoker;
+    private InvocationContextContainer icc;
+    private CommandsFactory commandsFactory;
+    private InterceptorChain invoker;
 
-   private Set<Flag> flags;
+    private Set<Flag> flags;
 
-   private DistributionManager distributionManager;
+    private DistributionManager distributionManager;
 
-   public ClusteredGetCommand() {
-   }
+    private long minVersion = 0; //with 0, it does not waits for anything and return a value compatible with maxVC
+    private VersionVC maxVersion = null; //read the most recent version (in tx context, this is not null)
+    private CommitLog commitLog;
 
-   public ClusteredGetCommand(Object key, String cacheName, Set<Flag> flags) {
-      this.key = key;
-      this.cacheName = cacheName;
-      this.flags = flags;
-   }
+    public ClusteredGetCommand() {
+    }
 
-   public ClusteredGetCommand(Object key, String cacheName) {
-      this(key, cacheName, Collections.<Flag>emptySet());
-   }
+    public ClusteredGetCommand(Object key, String cacheName, Set<Flag> flags) {
+        this.key = key;
+        this.cacheName = cacheName;
+        this.flags = flags;
+    }
 
-   public void initialize(InvocationContextContainer icc, CommandsFactory commandsFactory,
-                          InterceptorChain interceptorChain, DistributionManager distributionManager) {
-      this.distributionManager = distributionManager;
-      this.icc = icc;
-      this.commandsFactory = commandsFactory;
-      this.invoker = interceptorChain;
-   }
+    public ClusteredGetCommand(Object key, String cacheName) {
+        this(key, cacheName, Collections.<Flag>emptySet());
+    }
 
-   /**
-    * Invokes a logical "get(key)" on a remote cache and returns results.
-    *
-    * @param context invocation context, ignored.
-    * @return returns an <code>CacheEntry</code> or null, if no entry is found.
-    */
-   public InternalCacheValue perform(InvocationContext context) throws Throwable {
-      if (distributionManager != null && distributionManager.isAffectedByRehash(key)) return null;
-      // make sure the get command doesn't perform a remote call
-      // as our caller is already calling the ClusteredGetCommand on all the relevant nodes
-      Set<Flag> commandFlags = EnumSet.of(Flag.SKIP_REMOTE_LOOKUP);
-      if (this.flags != null) commandFlags.addAll(this.flags);
-      GetKeyValueCommand command = commandsFactory.buildGetKeyValueCommand(key, commandFlags);
-      command.setReturnCacheEntry(true);
-      InvocationContext invocationContext = icc.createRemoteInvocationContextForCommand(command, getOrigin());
-      CacheEntry cacheEntry = (CacheEntry) invoker.invoke(invocationContext, command);
-      if (cacheEntry == null) {
-         if (trace) log.trace("Did not find anything, returning null");
-         return null;
-      }
-      //this might happen if the value was fetched from a cache loader
-      if (cacheEntry instanceof MVCCEntry) {
-         if (trace) log.trace("Handloing an internal cache entry...");
-         MVCCEntry mvccEntry = (MVCCEntry) cacheEntry;
-         return InternalEntryFactory.createValue(mvccEntry.getValue(), -1, mvccEntry.getLifespan(), -1, mvccEntry.getMaxIdle());
-      } else {
-         InternalCacheEntry internalCacheEntry = (InternalCacheEntry) cacheEntry;
-         return internalCacheEntry.toInternalCacheValue();
-      }
-   }
+    public void initialize(InvocationContextContainer icc, CommandsFactory commandsFactory,
+                           InterceptorChain interceptorChain, DistributionManager distributionManager,
+                           CommitLog commitLog) {
+        this.distributionManager = distributionManager;
+        this.icc = icc;
+        this.commandsFactory = commandsFactory;
+        this.invoker = interceptorChain;
+        this.commitLog = commitLog;
+    }
 
-   public byte getCommandId() {
-      return COMMAND_ID;
-   }
+    /**
+     * Invokes a logical "get(key)" on a remote cache and returns results.
+     *
+     * @param context invocation context, ignored.
+     * @return returns an <code>CacheEntry</code> or null, if no entry is found.
+     */
+    public Object perform(InvocationContext context) throws Throwable {
+        if (distributionManager != null && distributionManager.isAffectedByRehash(key)) return null;
+        // make sure the get command doesn't perform a remote call
+        // as our caller is already calling the ClusteredGetCommand on all the relevant nodes
+        Set<Flag> commandFlags = EnumSet.of(Flag.SKIP_REMOTE_LOOKUP);
+        if (this.flags != null) commandFlags.addAll(this.flags);
+        GetKeyValueCommand command = commandsFactory.buildGetKeyValueCommand(key, commandFlags);
+        command.setReturnCacheEntry(true);
+        InvocationContext invocationContext = icc.createRemoteInvocationContextForCommand(command, getOrigin());
 
-   public Object[] getParameters() {
-      return new Object[]{key, cacheName, flags};
-   }
+        if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE && maxVersion != null) {
+            ((NonTxInvocationContext)invocationContext).setReadBasedOnVersion(true);
+            ((NonTxInvocationContext) invocationContext).setVersionToRead(maxVersion);
 
-   public void setParameters(int commandId, Object[] args) {
-      key = args[0];
-      cacheName = (String) args[1];
-      if (args.length>2) {
-         this.flags = (Set<Flag>) args[2];
-      }
-   }
+            long timeout = configuration.getSyncReplTimeout();
+            if(!commitLog.waitUntilMinVersionIsGuaranteed(minVersion, distributionManager.locateGroup(key).getId(),
+                    timeout)) {
+                return null; //no version available
+            }
+        }
 
-   @Override
-   public boolean equals(Object o) {
-      if (this == o) return true;
-      if (o == null || getClass() != o.getClass()) return false;
+        CacheEntry cacheEntry = (CacheEntry) invoker.invoke(invocationContext, command);
+        if (cacheEntry == null) {
+            if (trace) log.trace("Did not find anything, returning null");
+            return null;
+        }
 
-      ClusteredGetCommand that = (ClusteredGetCommand) o;
+        if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
+            return invocationContext.getReadKey(key); //all data needed is here. just send it back
+        } else {
+            return getValueForWeakConsistency(cacheEntry);
+        }
 
-      return !(key != null ? !key.equals(that.key) : that.key != null);
-   }
+        //TODO with serializability:
+        /*
+         * 1 - wait until commitLog's most recent version has a version higher than min version
+         * 1.1 - wait for how much time?? (sync timeout)
+         * 2 - set the max version somewhere and read the key (don't forger to return an InternalMVCCEntry)
+         * 3 - send it back
+         */
+    }
 
-   @Override
-   public int hashCode() {
-      int result;
-      result = (key != null ? key.hashCode() : 0);
-      return result;
-   }
+    private InternalCacheValue getValueForWeakConsistency(CacheEntry cacheEntry) {
+        //this might happen if the value was fetched from a cache loader
+        if (cacheEntry instanceof MVCCEntry) {
+            if (trace) log.trace("Handloing an internal cache entry...");
+            MVCCEntry mvccEntry = (MVCCEntry) cacheEntry;
+            return InternalEntryFactory.createValue(mvccEntry.getValue(), -1, mvccEntry.getLifespan(), -1, mvccEntry.getMaxIdle());
+        } else {
+            InternalCacheEntry internalCacheEntry = (InternalCacheEntry) cacheEntry;
+            return internalCacheEntry.toInternalCacheValue();
+        }
+    }
 
-   @Override
-   public String toString() {
-      return new StringBuilder()
-         .append("ClusteredGetCommand{key=")
-         .append(key)
-         .append(", flags=").append(flags)
-         .append("}")
-         .toString();
-   }
+    public byte getCommandId() {
+        return COMMAND_ID;
+    }
 
-   public String getCacheName() {
-      return cacheName;
-   }
+    public Object[] getParameters() {
+        return new Object[]{key, cacheName, minVersion, maxVersion, flags};
+    }
 
-   public Object getKey() {
-      return key;
-   }
+    public void setParameters(int commandId, Object[] args) {
+        key = args[0];
+        cacheName = (String) args[1];
+        minVersion = (Long) args[2];
+        maxVersion = (VersionVC) args[3];
+        if (args.length>4) {
+            this.flags = (Set<Flag>) args[4];
+        }
+    }
 
-   @Override
-   public Set<Flag> getFlags() {
-      return flags;
-   }
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
 
-   @Override
-   public void setFlags(Set<Flag> flags) {
-      this.flags = flags;
-   }
+        ClusteredGetCommand that = (ClusteredGetCommand) o;
+
+        return !(key != null ? !key.equals(that.key) : that.key != null);
+    }
+
+    @Override
+    public int hashCode() {
+        int result;
+        result = (key != null ? key.hashCode() : 0);
+        return result;
+    }
+
+    @Override
+    public String toString() {
+        return new StringBuilder()
+                .append("ClusteredGetCommand{key=")
+                .append(key)
+                .append(", flags=").append(flags)
+                .append("}")
+                .toString();
+    }
+
+    public String getCacheName() {
+        return cacheName;
+    }
+
+    public Object getKey() {
+        return key;
+    }
+
+    @Override
+    public Set<Flag> getFlags() {
+        return flags;
+    }
+
+    @Override
+    public void setFlags(Set<Flag> flags) {
+        this.flags = flags;
+    }
+
+    public long getMinVersion() {
+        return minVersion;
+    }
+
+    public void setMinVersion(long minVersion) {
+        this.minVersion = minVersion;
+    }
+
+    public VersionVC getMaxVersion() {
+        return maxVersion;
+    }
+
+    public void setMaxVersion(VersionVC maxVersion) {
+        this.maxVersion = maxVersion;
+    }
 }

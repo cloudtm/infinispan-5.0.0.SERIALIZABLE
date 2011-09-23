@@ -28,6 +28,8 @@ import org.infinispan.CacheException;
 import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.context.Flag;
 import org.infinispan.context.InvocationContext;
+import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.util.BidirectionalMap;
 import org.infinispan.util.InfinispanCollections;
@@ -139,7 +141,27 @@ public final class ImmutableContext implements InvocationContext {
       return Collections.emptySet();
    }
 
-   @Override
+    @Override
+    public boolean readBasedOnVersion() {
+        return false;
+    }
+
+    @Override
+    public void addReadKey(Object key, InternalMVCCEntry ime) {
+        //no-op by default
+    }
+
+    @Override
+    public InternalMVCCEntry getReadKey(Object Key) {
+        return null;
+    }
+
+    @Override
+    public VersionVC calculateVersionToRead() {
+        return null;
+    }
+
+    @Override
    public InvocationContext clone() {
       return this;
    }

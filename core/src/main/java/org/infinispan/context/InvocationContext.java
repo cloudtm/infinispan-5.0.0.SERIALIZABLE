@@ -24,6 +24,8 @@ package org.infinispan.context;
 
 import java.util.Set;
 
+import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.transport.Address;
 
 /**
@@ -36,36 +38,44 @@ import org.infinispan.remoting.transport.Address;
  */
 public interface InvocationContext extends EntryLookup, FlagContainer, Cloneable {
 
-   /**
-    * Returns true if the call was originated locally, false if it is the result of a remote rpc.
-    */
-   boolean isOriginLocal();
-   
-   /**
-    * Get the origin of the command, or null if the command originated locally
-    * @return
-    */
-   Address getOrigin();
+    /**
+     * Returns true if the call was originated locally, false if it is the result of a remote rpc.
+     */
+    boolean isOriginLocal();
 
-   /**
-    * Returns true if this call is performed in the context of an transaction, false otherwise.
-    */
-   boolean isInTxScope();
+    /**
+     * Get the origin of the command, or null if the command originated locally
+     * @return
+     */
+    Address getOrigin();
 
-   /**
-    * Returns the in behalf of which locks will be aquired.
-    */
-   Object getLockOwner();
+    /**
+     * Returns true if this call is performed in the context of an transaction, false otherwise.
+     */
+    boolean isInTxScope();
 
-   boolean isUseFutureReturnType();
+    /**
+     * Returns the in behalf of which locks will be aquired.
+     */
+    Object getLockOwner();
 
-   void setUseFutureReturnType(boolean useFutureReturnType);
+    boolean isUseFutureReturnType();
 
-   InvocationContext clone();
+    void setUseFutureReturnType(boolean useFutureReturnType);
 
-   /**
-    * Returns the set of keys that are locked for writing.
-    */
-   public Set<Object> getLockedKeys();
+    InvocationContext clone();
 
+    /**
+     * Returns the set of keys that are locked for writing.
+     */
+    public Set<Object> getLockedKeys();
+
+    //Pedro's new interface for the multi-version reads
+    public boolean readBasedOnVersion();
+
+    void addReadKey(Object key, InternalMVCCEntry ime);
+
+    InternalMVCCEntry getReadKey(Object Key);
+
+    VersionVC calculateVersionToRead();
 }

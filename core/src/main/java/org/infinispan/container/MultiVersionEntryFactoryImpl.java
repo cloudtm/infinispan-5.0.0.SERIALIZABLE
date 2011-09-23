@@ -5,10 +5,12 @@ import org.infinispan.config.Configuration;
 import org.infinispan.container.entries.*;
 import org.infinispan.context.Flag;
 import org.infinispan.context.InvocationContext;
+import org.infinispan.context.impl.NonTxInvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.marshall.MarshalledValue;
 import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.notifications.cachelistener.CacheNotifier;
 import org.infinispan.transaction.xa.InvalidTransactionException;
 import org.infinispan.util.Util;
@@ -184,15 +186,18 @@ public class MultiVersionEntryFactoryImpl implements EntryFactory {
                 log.tracef("Key %s is not in context, fetching from container.", key);
             }
 
-            if (ctx.isInTxScope()) {
-                InternalMVCCEntry ime = container.get(key, ((TxInvocationContext) ctx).calculateVersionToRead());
+            if (ctx.isInTxScope() || ctx.readBasedOnVersion()) {
+
+                VersionVC maxToRead = ctx.calculateVersionToRead();
+
+                InternalMVCCEntry ime = container.get(key, maxToRead);
                 cacheEntry = ime.getValue();
 
                 MVCCEntry mvccEntry = cacheEntry == null ?
                         createWrappedEntry(key, null, false, false, -1) :
                         createWrappedEntry(key, cacheEntry.getValue(), false, false, cacheEntry.getLifespan());
                 if (mvccEntry != null) {
-                    ((TxInvocationContext) ctx).addReadKey(key,ime);
+                    ctx.addReadKey(key,ime);
                     ctx.putLookedUpEntry(key, mvccEntry);
                 }
                 return mvccEntry;

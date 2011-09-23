@@ -9,15 +9,15 @@ import java.util.List;
  *         Date: 08-08-2011
  */
 public class ReplGroup {
-    private long id;
+    private int id;
     private List<Address> members;
 
-    public ReplGroup(long id, List<Address> addrs) {
+    public ReplGroup(int id, List<Address> addrs) {
         this.id = id;
         this.members = addrs;
     }
 
-    public long getId() {
+    public int getId() {
         return id;
     }
 

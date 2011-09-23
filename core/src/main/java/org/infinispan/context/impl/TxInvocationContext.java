@@ -83,13 +83,7 @@ public interface TxInvocationContext extends InvocationContext {
     boolean isTransactionValid();
 
     //Pedro: new interface
-    void addReadKey(Object key, InternalMVCCEntry ime);
-
     void markReadFrom(int idx);
-
-    InternalMVCCEntry getReadKey(Object Key);
-
-    VersionVC calculateVersionToRead();
 
     void updateVectorClock(VersionVC other);
 

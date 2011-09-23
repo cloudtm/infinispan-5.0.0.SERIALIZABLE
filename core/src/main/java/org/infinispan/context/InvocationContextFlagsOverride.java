@@ -29,6 +29,8 @@ import java.util.Map;
 import java.util.Set;
 
 import org.infinispan.container.entries.CacheEntry;
+import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.util.BidirectionalMap;
 
@@ -158,8 +160,28 @@ public class InvocationContextFlagsOverride implements InvocationContext {
    public Set<Object> getLockedKeys() {
       return delegate.getLockedKeys();
    }
-   
-   @Override
+
+    @Override
+    public boolean readBasedOnVersion() {
+        return delegate.readBasedOnVersion();
+    }
+
+    @Override
+    public void addReadKey(Object key, InternalMVCCEntry ime) {
+        delegate.addReadKey(key, ime);
+    }
+
+    @Override
+    public InternalMVCCEntry getReadKey(Object Key) {
+        return delegate.getReadKey(Key);
+    }
+
+    @Override
+    public VersionVC calculateVersionToRead() {
+        return delegate.calculateVersionToRead();
+    }
+
+    @Override
    public Address getOrigin() {
       return delegate.getOrigin();
    }

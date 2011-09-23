@@ -23,10 +23,13 @@
 package org.infinispan.context.impl;
 
 import org.infinispan.container.entries.CacheEntry;
+import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.VersionVC;
 import org.infinispan.util.BidirectionalLinkedHashMap;
 import org.infinispan.util.BidirectionalMap;
 import org.infinispan.util.InfinispanCollections;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -37,70 +40,110 @@ import java.util.Map;
  */
 public class NonTxInvocationContext extends AbstractInvocationContext {
 
-   protected BidirectionalLinkedHashMap<Object, CacheEntry> lookedUpEntries = null;
+    protected BidirectionalLinkedHashMap<Object, CacheEntry> lookedUpEntries = null;
 
-   public CacheEntry lookupEntry(Object k) {
-      return lookedUpEntries == null ? null : lookedUpEntries.get(k);
-   }
+    //for serializability
+    private boolean readBasedOnVersion = false;
+    private VersionVC versionVC = null;
+    private Map<Object, InternalMVCCEntry> readKeys = new HashMap<Object, InternalMVCCEntry>();
 
-   public void removeLookedUpEntry(Object key) {
-      if (lookedUpEntries != null) lookedUpEntries.remove(key);
-   }
+    public CacheEntry lookupEntry(Object k) {
+        return lookedUpEntries == null ? null : lookedUpEntries.get(k);
+    }
 
-   public void putLookedUpEntry(Object key, CacheEntry e) {
-      initLookedUpEntries();
-      lookedUpEntries.put(key, e);
-   }
+    public void removeLookedUpEntry(Object key) {
+        if (lookedUpEntries != null) lookedUpEntries.remove(key);
+    }
 
-   public void putLookedUpEntries(Map<Object, CacheEntry> lookedUpEntries) {
-      initLookedUpEntries();
-      for (Map.Entry<Object, CacheEntry> ce: lookedUpEntries.entrySet()) {
-         lookedUpEntries.put(ce.getKey(), ce.getValue());
-      }
-   }
+    public void putLookedUpEntry(Object key, CacheEntry e) {
+        initLookedUpEntries();
+        lookedUpEntries.put(key, e);
+    }
 
-   public void clearLookedUpEntries() {
-      if (lookedUpEntries != null) lookedUpEntries.clear();
-   }
+    public void putLookedUpEntries(Map<Object, CacheEntry> lookedUpEntries) {
+        initLookedUpEntries();
+        for (Map.Entry<Object, CacheEntry> ce: lookedUpEntries.entrySet()) {
+            lookedUpEntries.put(ce.getKey(), ce.getValue());
+        }
+    }
 
-   @SuppressWarnings("unchecked")
-   public BidirectionalMap<Object, CacheEntry> getLookedUpEntries() {
-      return (BidirectionalMap<Object, CacheEntry>)
-            (lookedUpEntries == null ? InfinispanCollections.emptyBidirectionalMap() : lookedUpEntries);
-   }
+    public void clearLookedUpEntries() {
+        if (lookedUpEntries != null) lookedUpEntries.clear();
+    }
 
-   public boolean isOriginLocal() {
-      return isContextFlagSet(ContextFlag.ORIGIN_LOCAL);
-   }
+    @SuppressWarnings("unchecked")
+    public BidirectionalMap<Object, CacheEntry> getLookedUpEntries() {
+        return (BidirectionalMap<Object, CacheEntry>)
+                (lookedUpEntries == null ? InfinispanCollections.emptyBidirectionalMap() : lookedUpEntries);
+    }
 
-   public void setOriginLocal(boolean originLocal) {
-      setContextFlag(ContextFlag.ORIGIN_LOCAL, originLocal);
-   }
+    public boolean isOriginLocal() {
+        return isContextFlagSet(ContextFlag.ORIGIN_LOCAL);
+    }
 
-   public boolean isInTxScope() {
-      return false;
-   }
+    public void setOriginLocal(boolean originLocal) {
+        setContextFlag(ContextFlag.ORIGIN_LOCAL, originLocal);
+    }
 
-   public Object getLockOwner() {
-      return Thread.currentThread();
-   }
+    public boolean isInTxScope() {
+        return false;
+    }
 
-   private void initLookedUpEntries() {
-      if (lookedUpEntries == null) lookedUpEntries = new BidirectionalLinkedHashMap<Object, CacheEntry>(4);
-   }
+    public Object getLockOwner() {
+        return Thread.currentThread();
+    }
 
-   @Override
-   public void reset() {
-      super.reset();
-      clearLookedUpEntries();
-   }
+    private void initLookedUpEntries() {
+        if (lookedUpEntries == null) lookedUpEntries = new BidirectionalLinkedHashMap<Object, CacheEntry>(4);
+    }
 
-   @Override
-   public NonTxInvocationContext clone() {
-      NonTxInvocationContext dolly = (NonTxInvocationContext) super.clone();
-      if (lookedUpEntries != null) {
-         dolly.lookedUpEntries = new BidirectionalLinkedHashMap<Object, CacheEntry>(lookedUpEntries);
-      }
-      return dolly;
-   }
+    @Override
+    public void reset() {
+        super.reset();
+        clearLookedUpEntries();
+        resetMultiVersion();
+    }
+
+    @Override
+    public NonTxInvocationContext clone() {
+        NonTxInvocationContext dolly = (NonTxInvocationContext) super.clone();
+        if (lookedUpEntries != null) {
+            dolly.lookedUpEntries = new BidirectionalLinkedHashMap<Object, CacheEntry>(lookedUpEntries);
+        }
+        return dolly;
+    }
+
+    @Override
+    public boolean readBasedOnVersion() {
+        return readBasedOnVersion;
+    }
+
+    public void setReadBasedOnVersion(boolean value) {
+        readBasedOnVersion = value;
+    }
+
+    public void setVersionToRead(VersionVC version) {
+        versionVC = version;
+    }
+
+    @Override
+    public void addReadKey(Object key, InternalMVCCEntry ime) {
+        readKeys.put(key, ime);
+    }
+
+    @Override
+    public InternalMVCCEntry getReadKey(Object key) {
+        return readKeys.get(key);
+    }
+
+    @Override
+    public VersionVC calculateVersionToRead() {
+        return versionVC;
+    }
+
+    private void resetMultiVersion() {
+        readBasedOnVersion = false;
+        versionVC = null;
+        readKeys.clear();
+    }
 }
