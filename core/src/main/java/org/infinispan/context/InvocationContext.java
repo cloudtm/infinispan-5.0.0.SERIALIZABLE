@@ -71,11 +71,15 @@ public interface InvocationContext extends EntryLookup, FlagContainer, Cloneable
     public Set<Object> getLockedKeys();
 
     //Pedro's new interface for the multi-version reads
-    public boolean readBasedOnVersion();
+    boolean readBasedOnVersion();
+
+    void setReadBasedOnVersion(boolean value);
 
     void addReadKey(Object key, InternalMVCCEntry ime);
 
     InternalMVCCEntry getReadKey(Object Key);
 
     VersionVC calculateVersionToRead();
+
+    void setVersionToRead(VersionVC version);
 }

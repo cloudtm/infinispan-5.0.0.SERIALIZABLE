@@ -167,6 +167,11 @@ public class InvocationContextFlagsOverride implements InvocationContext {
     }
 
     @Override
+    public void setReadBasedOnVersion(boolean value) {
+        delegate.setReadBasedOnVersion(value);
+    }
+
+    @Override
     public void addReadKey(Object key, InternalMVCCEntry ime) {
         delegate.addReadKey(key, ime);
     }
@@ -179,6 +184,11 @@ public class InvocationContextFlagsOverride implements InvocationContext {
     @Override
     public VersionVC calculateVersionToRead() {
         return delegate.calculateVersionToRead();
+    }
+
+    @Override
+    public void setVersionToRead(VersionVC version) {
+        delegate.setVersionToRead(version);
     }
 
     @Override

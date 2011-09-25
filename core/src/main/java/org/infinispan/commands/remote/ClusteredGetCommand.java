@@ -37,6 +37,7 @@ import org.infinispan.context.impl.NonTxInvocationContext;
 import org.infinispan.distribution.DistributionManager;
 import org.infinispan.interceptors.InterceptorChain;
 import org.infinispan.mvcc.CommitLog;
+import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.util.concurrent.IsolationLevel;
 import org.infinispan.util.logging.Log;
@@ -114,12 +115,16 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
         InvocationContext invocationContext = icc.createRemoteInvocationContextForCommand(command, getOrigin());
 
         if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE && maxVersion != null) {
-            ((NonTxInvocationContext)invocationContext).setReadBasedOnVersion(true);
-            ((NonTxInvocationContext) invocationContext).setVersionToRead(maxVersion);
+            invocationContext.setReadBasedOnVersion(true);
+            invocationContext.setVersionToRead(maxVersion);
 
             long timeout = configuration.getSyncReplTimeout();
             if(!commitLog.waitUntilMinVersionIsGuaranteed(minVersion, distributionManager.locateGroup(key).getId(),
                     timeout)) {
+                if(log.isInfoEnabled()) {
+                    log.infof("Receive remote get request, but the value wanted is not available. key: %s," +
+                            "min version: %s, max version: %s", key, minVersion, maxVersion);
+                }
                 return null; //no version available
             }
         }
@@ -131,7 +136,12 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
         }
 
         if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
-            return invocationContext.getReadKey(key); //all data needed is here. just send it back
+            InternalMVCCEntry ime = invocationContext.getReadKey(key); //all data needed is here. just send it back
+            if(log.isInfoEnabled()) {
+                log.infof("Receive remote get request [key: %s, min version: %s, max version: %s] and return value is %s",
+                        key, minVersion, maxVersion, ime);
+            }
+            return ime;
         } else {
             return getValueForWeakConsistency(cacheEntry);
         }

@@ -127,7 +127,6 @@ public class DistributionInterceptor extends BaseRpcInterceptor {
         // so we need to check whether join has completed as well.
         boolean isRehashInProgress = !dm.isJoinComplete() || dm.isRehashInProgress();
         Object returnValue = invokeNextInterceptor(ctx, command);
-        Object key = command.getKey();
 
         // If L1 caching is enabled, this is a remote command, and we found a value in our cache
         // we store it so that we can later invalidate it
@@ -139,9 +138,6 @@ public class DistributionInterceptor extends BaseRpcInterceptor {
         // available.  It could just have been removed in the same tx beforehand.
         if (needsRemoteGet(ctx, command.getKey(), returnValue == null)) {
             returnValue = remoteGetAndStoreInL1(ctx, command.getKey(), isRehashInProgress, false);
-        } else if(ctx.isInTxScope()) {
-            int idx = dm.locateGroup(key).getId();
-            ((TxInvocationContext) ctx).markReadFrom(idx);
         }
 
         return returnValue;

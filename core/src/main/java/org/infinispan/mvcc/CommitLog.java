@@ -1,7 +1,6 @@
 package org.infinispan.mvcc;
 
 
-import org.infinispan.Version;
 import org.infinispan.factories.annotations.Start;
 import org.infinispan.factories.annotations.Stop;
 import org.infinispan.util.logging.Log;
@@ -20,6 +19,8 @@ public class CommitLog {
     private VersionEntry actual;
     private final Object versionChangeNotifier = new Object();
 
+    private boolean debug;
+
     public CommitLog() {
         actual = new VersionEntry();
         actual.version = new VersionVC();
@@ -31,6 +32,7 @@ public class CommitLog {
             actual = new VersionEntry();
             actual.version = new VersionVC();
         }
+        debug = log.isDebugEnabled();
     }
 
     @Stop
@@ -53,9 +55,18 @@ public class CommitLog {
             VersionEntry it = actual;
             while(it != null) {
                 if(it.version.isLessOrEquals(other)) {
+                    if(debug) {
+                        log.debugf("Get version less or equal than %s. return value is %s",
+                                other, it.version);
+                    }
                     return it.version;
                 }
                 it = it.previous;
+            }
+
+            if(debug) {
+                log.debugf("Get version less or equal than %s. return value is null",
+                        other);
             }
             return null;
         } finally {
@@ -76,8 +87,10 @@ public class CommitLog {
                 versionChangeNotifier.notifyAll();
             }
         } finally {
-            log.debugf("added new version to commit log. actual version is %s",
-                    actual.version);
+            if(debug) {
+                log.debugf("Added new version to commit log. actual version is %s",
+                        actual.version);
+            }
             lock.writeLock().unlock();
         }
     }
@@ -91,13 +104,20 @@ public class CommitLog {
      * @throws InterruptedException if interrupted
      */
     public boolean waitUntilMinVersionIsGuaranteed(long minVersion, int position, long timeout) throws InterruptedException {
-        if(minVersion == 0) {
+        if(minVersion <= 0) {
+            if(debug) {
+                log.debugf("Wait until min version but min version is less or equals than zero");
+            }
             return true;
         }
 
         long finalTimeout = System.currentTimeMillis() + timeout;
         do {
             VersionVC version = getActualVersion();
+            if(debug) {
+                log.debugf("Wait until min version. actual version: %s, min version %s, position: %s",
+                        version, minVersion, position);
+            }
             if(version.get(position) >= minVersion) {
                 return true;
             }
@@ -105,7 +125,14 @@ public class CommitLog {
                 versionChangeNotifier.wait(finalTimeout - System.currentTimeMillis());
             }
         } while(System.currentTimeMillis() < finalTimeout);
+
         VersionVC version = getActualVersion();
+
+        if(debug) {
+            log.debugf("Wait until min version. actual version: %s, min version %s, position: %s",
+                    version, minVersion, position);
+        }
+
         return version.get(position) >= minVersion;
     }
 

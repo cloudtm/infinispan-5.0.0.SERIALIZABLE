@@ -12,6 +12,7 @@ import org.infinispan.context.InvocationContextContainer;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.distribution.DistributionManager;
 import org.infinispan.factories.annotations.Inject;
+import org.infinispan.factories.annotations.Start;
 import org.infinispan.mvcc.CommitLog;
 import org.infinispan.mvcc.CommitQueue;
 import org.infinispan.mvcc.InternalMVCCEntry;
@@ -34,6 +35,8 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
     private DistributionManager distributionManager;
     private CommitLog commitLog;
 
+    private boolean info, debug;
+
     @Inject
     public void inject(CommandsFactory commandsFactory, CommitQueue commitQueue, InvocationContextContainer icc,
                        DistributionManager distributionManager, CommitLog commitLog) {
@@ -44,107 +47,164 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
         this.commitLog = commitLog;
     }
 
+    @Start
+    public void setDebugBoolean() {
+        info = log.isInfoEnabled();
+        debug = log.isDebugEnabled();
+    }
+
     @Override
     public Object visitPrepareCommand(TxInvocationContext ctx, PrepareCommand command) throws Throwable {
+        if(trace) {
+            log.infof("Prepare Command received for transaction %s",
+                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
+        }
+
         Set<Object> writeSet = getOnlyLocalKeys(command.getAffectedKeys());
         Set<Object> readSet = getOnlyLocalKeys(command.getReadSet());
 
-        if(ctx.isOriginLocal() && writeSet != null && writeSet.isEmpty()) {
-            log.debugf("new transaction [%s] arrived to SerialTxInterceptor. it is a Read-Only Transaction. returning",
-                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
+        if(ctx.isOriginLocal() && writeSet.isEmpty()) {
+            if(debug) {
+                log.debugf("Transaction [%s] is read-only and it wants to prepare. ignore it and return.",
+                        Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
+            }
             //read-only transaction has a valid snapshot
             return null;
         }
 
-        log.debugf("new transaction [%s] arrived to SerialTxInterceptor. readSet=%s, writeSet=%s, version=%s",
-                Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
-                readSet, writeSet, command.getVersion());
+        if(debug) {
+            log.debugf("Transaction [%s] wants to prepare. read set: %s, write set: %s, version :%s",
+                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
+                    readSet, writeSet, command.getVersion());
+        }
 
-        //first acquire the read write locks and (second) validate the readset
+        //it acquires the read-write locks and it validates the read set
         AcquireValidationLocksCommand locksCommand = commandsFactory.buildAcquireValidationLocksCommand(
                 command.getGlobalTransaction(), readSet, writeSet, command.getVersion());
         invokeNextInterceptor(ctx, locksCommand);
 
-        log.debugf("transaction [%s] passes validation",
-                Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
+        if(debug) {
+            log.debugf("Transaction [%s] passes validation",
+                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
+        }
 
-        //third (this is equals to old schemes) wrap the wrote entries
+        //(this is equals to old schemes) wrap the wrote entries
         //finally, process the rest of the command
         Object retVal = super.visitPrepareCommand(ctx, command);
 
         VersionVC commitVC;
 
-        if(writeSet != null && writeSet.isEmpty()) {
+        if(!writeSet.isEmpty()) {
             commitVC = commitQueue.addTransaction(command.getGlobalTransaction(), ctx.calculateVersionToRead(),
-                icc.getInvocationContext().clone(), getVCPositions(writeSet));
+                    icc.getInvocationContext().clone(), getVCPositions(writeSet));
+
+            if(info) {
+                log.infof("Transaction %s can commit. It was added to commit queue. " +
+                        "The 'temporary' commit version is %s",
+                        Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
+                        commitVC);
+            }
         } else {
             //if it is readonly, return the most recent version
             commitVC = commitLog.getActualVersion();
+
+            if(info) {
+                log.infof("Transaction %s can commit. It is read-only on this node. " +
+                        "The 'temporary' commit version is %s",
+                        Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
+                        commitVC);
+            }
         }
 
 
         if(retVal != null && retVal instanceof VersionVC) {
+            //the retVal has the maximum vector clock of all involved nodes
+            //this in only performed in the node that executed the transaction (I hope)
             VersionVC othersCommitVC = (VersionVC) retVal;
             commitVC.setToMaximum(othersCommitVC);
+            calculateCommitVC(commitVC, getVCPositions(writeSet));
         }
 
-        calculateCommitVC(commitVC, getVCPositions(writeSet));
         ctx.setCommitVersion(commitVC);
 
-        log.debugf("transaction [%s] commit vector clock is %s",
-                Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
-                commitVC);
+        if(debug) {
+            log.debugf("Transaction [%s] %s commit version is %s",
+                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
+                    (ctx.isOriginLocal() ? "final" : "temporary"),
+                    commitVC);
+        }
+
         return commitVC;
     }
 
     @Override
     public Object visitCommitCommand(TxInvocationContext ctx, CommitCommand command) throws Throwable {
-        log.debugf("received commit command for %s", Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
-        if(ctx.isInTxScope() && ctx.isOriginLocal() && !ctx.hasModifications()) {
-            log.debugf("try commit a read-only transaction [%s]. returning...",
+        if(info) {
+            log.infof("Commit Command received for transaction %s",
                     Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
-            return null;
         }
 
-        /*log.warnf("looked up keys for %s are %s",
-                Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
-                ctx.getLookedUpEntries());*/
         return super.visitCommitCommand(ctx, command);
     }
 
     @Override
     public Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable {
-        log.debugf("received rollback command for %s", Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
+        if(info) {
+            log.infof("Rollback Command received for transaction %s", Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
+        }
         return super.visitRollbackCommand(ctx, command);
     }
 
     @Override
     public Object visitGetKeyValueCommand(InvocationContext ctx, GetKeyValueCommand command) throws Throwable {
-        Object retval = super.visitGetKeyValueCommand(ctx, command);
+        Object retVal = super.visitGetKeyValueCommand(ctx, command);
+
         if(ctx.isInTxScope()) {
-            ((TxInvocationContext) ctx).markReadFrom(0);
+            TxInvocationContext txctx = (TxInvocationContext) ctx;
+            String gtxID = Util.prettyPrintGlobalTransaction(txctx.getGlobalTransaction());
+
+            int pos = getPositionInVC(command.getKey());
+            txctx.markReadFrom(pos);
+
             //update vc
-            InternalMVCCEntry ime = ((TxInvocationContext) ctx).getReadKey(command.getKey());
+            InternalMVCCEntry ime = ctx.getReadKey(command.getKey());
+
             if(ime == null) {
-                log.warn("InternalMVCCEntry is null.");
-            } else if(((TxInvocationContext) ctx).hasModifications() && !ime.isMostRecent()) {
+                log.warnf("InternalMVCCEntry is null for key %s in transaction %s",
+                        command.getKey(), gtxID);
+            } else if(txctx.hasModifications() && !ime.isMostRecent()) {
                 //read an old value... the tx will abort in commit,
                 //so, do not waste time and abort it now
-                throw new CacheException("transaction must abort!! read an old value and it is not a read only transaction");
+                if(info) {
+                    log.infof("Read-Write transaction [%s] read an old value. It will be aborted",
+                            gtxID);
+                }
+                throw new CacheException("Read-Write Transaction read an old value");
             } else {
                 VersionVC v = ime.getVersion();
-                int pos = getPositionInVC(command.getKey());
+
                 if(v.get(pos) == VersionVC.EMPTY_POSITION) {
                     v.set(pos,0);
                 }
-                ((TxInvocationContext) ctx).updateVectorClock(v);
-                if(!ctx.isOriginLocal()) {
-                    retval = v;
+
+                if(debug) {
+                    log.debugf("Transaction [%s] read key %s and visible vector clock is %s (Group ID: %s)",
+                            gtxID, command.getKey(), v, pos);
                 }
+                txctx.updateVectorClock(v);
             }
         }
 
-        return retval;
+        //remote get
+        if(!ctx.isOriginLocal()) {
+            InternalMVCCEntry ime = ctx.getReadKey(command.getKey());
+            retVal = ime;
+            if(debug) {
+                log.debugf("Remote Get received. return value is %s", ime);
+            }
+        }
+
+        return retVal;
     }
 
     /**
@@ -167,9 +227,14 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
         for(Object key : writeSet) {
             positions.add(getPositionInVC(key));
         }
-        Integer[] retval = new Integer[positions.size()];
-        positions.toArray(retval);
-        return retval;
+        Integer[] retVal = new Integer[positions.size()];
+        positions.toArray(retVal);
+
+        if(debug) {
+            log.debugf("Groups IDs for %s are %s", writeSet, retVal);
+        }
+
+        return retVal;
     }
 
     private int getPositionInVC(Object key) {
@@ -178,6 +243,11 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
 
     private void calculateCommitVC(VersionVC vc, Integer[] writeGroups) {
         //first, calculate the maximum value in the write groups
+        String originalVC = null;
+        if(debug) {
+            originalVC = vc.toString();
+        }
+
         long maxValue = 0;
         for(Integer pos : writeGroups) {
             long val = vc.get(pos);
@@ -189,6 +259,11 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
         //second, set the write groups position to the maximum
         for(Integer pos : writeGroups) {
             vc.set(pos, maxValue);
+        }
+
+        if(debug) {
+            log.debugf("Calculate the commit version from %s. The modified groups are %s and the final" +
+                    " version is %s", originalVC, writeGroups, vc);
         }
     }
 }

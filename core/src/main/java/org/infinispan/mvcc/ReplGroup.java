@@ -27,6 +27,6 @@ public class ReplGroup {
 
     @Override
     public String toString() {
-        return "[Replication Group: id=" + id + ",members=" + members + "]";
+        return "ReplicationGroup{id=" + id + ",members=" + members + "}";
     }
 }

@@ -32,6 +32,8 @@ public class CommitQueue {
     private InterceptorChain ic;
     private InvocationContextContainer icc;
 
+    private boolean trace, debug;
+
     public CommitQueue() {
         prepareVC = new VersionVC();
         commitQueue = new ArrayList<ListEntry>();
@@ -63,18 +65,27 @@ public class CommitQueue {
 
     @Start
     public void start() {
+        trace = log.isTraceEnabled();
+        debug = log.isDebugEnabled();
+
         if(commitInvocationInstance == null) {
             List<CommandInterceptor> all = ic.getInterceptorsWhichExtend(LockingInterceptor.class);
-            log.debugf("interceptors found: %s", all);
+            if(log.isInfoEnabled()) {
+                log.infof("Starting Commit Queue Component. Searching interceptors with interface CommitInstance. " +
+                        "Found: %s", all);
+            }
             for(CommandInterceptor ci : all) {
                 if(ci instanceof CommitInstance) {
+                    if(debug) {
+                        log.debugf("Interceptor implementing CommitInstance found! It is %s", ci);
+                    }
                     commitInvocationInstance = (CommitInstance) ci;
                     break;
                 }
             }
         }
         if(commitInvocationInstance == null) {
-            throw new NullPointerException("commit invocation instance must not be null in serializable mode!!");
+            throw new NullPointerException("Commit Invocation Instance must not be null in serializable mode.");
         }
         if(!applyThread.run) {
             applyThread.start();
@@ -109,8 +120,10 @@ public class CommitQueue {
 
             synchronized (commitQueue) {
                 int idx = searchInsertIndex(prepared);
-                log.debugf("added to queue %s in position %s. queue is %s",
-                        Util.prettyPrintGlobalTransaction(gtx), idx, commitQueue.toString());
+                if(debug) {
+                    log.debugf("Adding transaction %s [%s] to queue in position %s. queue state is %s",
+                            Util.prettyPrintGlobalTransaction(gtx), prepared, idx, commitQueue.toString());
+                }
                 commitQueue.add(idx, le);
                 commitQueue.notifyAll();
             }
@@ -130,14 +143,13 @@ public class CommitQueue {
      * @return true if the modification was already applied
      */
     public boolean updateAndWait(GlobalTransaction gtx, VersionVC commitVC) throws InterruptedException {
-        log.warnf("update and wait gtx=%s, commitVC=%s",
-                Util.prettyPrintGlobalTransaction(gtx), commitVC);
 
         synchronized (prepareVC) {
             prepareVC.setToMaximum(commitVC);
-            log.debugf("update transaction %s and prepareVC %s",
-                    Util.prettyPrintGlobalTransaction(gtx),
-                    prepareVC);
+            if(debug) {
+                log.debugf("Update prepare vector clock to %s",
+                        prepareVC);
+            }
         }
 
         ListEntry toSearch = new ListEntry();
@@ -152,52 +164,72 @@ public class CommitQueue {
                 commitQueue.add(idx, le);
             }
 
-            log.debugf("update transaction %s and index is %s",
-                    Util.prettyPrintGlobalTransaction(gtx),
-                    idx);
+            if(debug) {
+                log.debugf("Update transaction %s position in queue. Final index is %s and commit version is %s",
+                        Util.prettyPrintGlobalTransaction(gtx),
+                        idx, commitVC);
+            }
 
             le.ready = true;
             commitQueue.notifyAll();
 
             if(le.gtx.isRemote()) {
-                log.warnf("transaction is remote. queue is %s and idx is %s", commitQueue, idx);
+                if(trace) {
+                    log.tracef("Transaction [%s] is remote... don't wait", Util.prettyPrintGlobalTransaction(gtx));
+                }
                 return false; //don't wait (don't care about the return value)
             }
 
             while(true) {
 
                 if(idx != 0) {
-                    log.debugf("wait for my turn... I'm %s and queue state is %s",
-                            Util.prettyPrintGlobalTransaction(gtx), commitQueue.toString());
+                    if(debug) {
+                        log.debugf("Transaction [%s] is not on head of the queue. Waiting for its turn. Queue is %s",
+                                Util.prettyPrintGlobalTransaction(gtx), commitQueue.toString());
+                    }
                     commitQueue.wait();
                     idx = commitQueue.indexOf(toSearch);
+                } else {
+                    if(debug) {
+                        log.debugf("Transaction [%s] is on head of the queue. Queue is %s",
+                                Util.prettyPrintGlobalTransaction(gtx), commitQueue.toString());
+                    }
                 }
-
-                log.warnf("check my status... queue is %s, my idx is %s",
-                        commitQueue, idx);
 
                 if(idx == 0 && commitQueue.size() > 1) {
                     ListEntry other = commitQueue.get(1);
-                    log.warnf("compare entries %s vs %s", le, other);
+                    if(debug) {
+                        log.debugf("Compare entries for batching. %s and %s", le, other);
+                    }
                     if(other.commitVC.isEquals(le.commitVC)) {
                         //both has the same commit vector clock... we need to wrap this transaction in one
                         if(!other.ready) {
-                            log.warnf("compare entries %s vs %s ==> same vector clock, but other is not ready",
-                                    le, other);
+                            if(trace) {
+                                log.tracef("compare entries %s and %s ==> same vector clock, but other is not ready",
+                                        le, other);
+                            }
                             idx = -1; //other is not ready... the vector clock can change. we must sure
                             // if they are different or not
                         } else {
+                            if(trace) {
+                                log.tracef("compare entries %s and %s ==> same vector clock, and other is ready",
+                                        le, other);
+                            }
                             //the other is ready and with the same vector clock... grab the modification and join to
                             //this transaction
                             le.ctx.putLookedUpEntries(other.ctx.getLookedUpEntries());
                             other.applied = true;
-                            log.warnf("compare entries %s vs %s ==> same vector clock, and other is ready",
-                                    le, other);
                         }
                     }
                 }
 
                 if(idx == 0) {
+                    if(debug) {
+                        log.debugf("Transaction [%s] is on head of the queue. The modification %s applied! Queue is %s",
+                                Util.prettyPrintGlobalTransaction(gtx),
+                                (le.applied ? "are" : "are not"),
+                                commitQueue.toString());
+                    }
                     return le.applied;
                 }
             }
@@ -214,8 +246,10 @@ public class CommitQueue {
         ListEntry toSearch = new ListEntry();
         toSearch.gtx = gtx;
         synchronized (commitQueue) {
-            log.debugf("remove from queue %s. queue is %s",
-                    Util.prettyPrintGlobalTransaction(gtx), commitQueue.toString());
+            if(trace) {
+                log.tracef("Remove transaction %s from queue. Queue is %s",
+                        Util.prettyPrintGlobalTransaction(gtx), commitQueue.toString());
+            }
             if(commitQueue.remove(toSearch)) {
                 commitQueue.notifyAll();
             }
@@ -227,7 +261,9 @@ public class CommitQueue {
      */
     public void removeFirst() {
         synchronized (commitQueue) {
-            log.warnf("remove first. queue is %s", commitQueue.toString());
+            if(trace) {
+                log.tracef("Remove first transaction from queue. Queue is %s", commitQueue.toString());
+            }
             commitQueue.remove(0);
             commitQueue.notifyAll();
         }
@@ -279,7 +315,7 @@ public class CommitQueue {
         private volatile boolean run = false;
 
         public ApplyRemoteModificationThread() {
-            super("ApplyRemoteModificationThread");
+            super("Apply-Remote-Modification-Thread");
         }
 
         @Override
@@ -290,30 +326,39 @@ public class CommitQueue {
                     ListEntry le;
                     synchronized (commitQueue) {
                         if(commitQueue.isEmpty()) {
+                            if(trace) {
+                                log.tracef("Commit Queue is empty. waiting for something...");
+                            }
                             commitQueue.wait();
                             continue;
                         }
                         le = commitQueue.get(0);
                         if(!le.gtx.isRemote() || !le.ready) {
+                            if(trace) {
+                                log.tracef("Head of commit queue [%s] is local or it is not ready. " +
+                                        "waiting for something...", le);
+                            }
                             commitQueue.wait();
                             continue;
                         }
-
-                        log.warnf("commit remote modifications. queue is %s", commitQueue);
                     }
 
                     try {
                         icc.resume(le.ctx);
-                        //log.warnf("commit thread... looked up keys are %s", le.ctx.getLookedUpEntries());
+                        if(debug) {
+                            log.debugf("Commit modifications for transaction %s",
+                                    Util.prettyPrintGlobalTransaction(le.gtx));
+                        }
                         commitInvocationInstance.commit(le.ctx, le.commitVC, le.applied);
                     } finally {
                         icc.suspend();
                         removeFirst();
                     }
                 } catch (InterruptedException e) {
+                    log.warnf("Interrupted Exception caught on Apply-Remote-Modification-Thread");
                     //no-op
                 } catch (Throwable t) {
-                    log.warnf("exception caught in apply commit thread... [%s]", t.getLocalizedMessage());
+                    log.warnf("Exception caught on Apply-Remote-Modification-Thread [%s]", t.getLocalizedMessage());
                 }
             }
         }

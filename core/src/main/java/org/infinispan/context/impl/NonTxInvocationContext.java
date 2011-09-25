@@ -118,10 +118,12 @@ public class NonTxInvocationContext extends AbstractInvocationContext {
         return readBasedOnVersion;
     }
 
+    @Override
     public void setReadBasedOnVersion(boolean value) {
         readBasedOnVersion = value;
     }
 
+    @Override
     public void setVersionToRead(VersionVC version) {
         versionVC = version;
     }

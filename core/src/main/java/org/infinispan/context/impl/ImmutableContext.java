@@ -147,6 +147,11 @@ public final class ImmutableContext implements InvocationContext {
     }
 
     @Override
+    public void setReadBasedOnVersion(boolean value) {
+        //no-op by default
+    }
+
+    @Override
     public void addReadKey(Object key, InternalMVCCEntry ime) {
         //no-op by default
     }
@@ -159,6 +164,11 @@ public final class ImmutableContext implements InvocationContext {
     @Override
     public VersionVC calculateVersionToRead() {
         return null;
+    }
+
+    @Override
+    public void setVersionToRead(VersionVC version) {
+        //no-op by default
     }
 
     @Override

@@ -347,6 +347,9 @@ public final class Util {
    }
 
     public static String prettyPrintGlobalTransaction(GlobalTransaction gtx) {
+        if(gtx == null) {
+            return "NO-TX";
+        }
         return new StringBuilder(gtx.getAddress() != null ? gtx.getAddress().toString() : "local").append(":").append(gtx.getId()).toString();
     }
 

@@ -1,6 +1,14 @@
 package org.infinispan.mvcc;
 
 import org.infinispan.container.entries.InternalCacheEntry;
+import org.infinispan.marshall.AbstractExternalizer;
+import org.infinispan.marshall.Ids;
+import org.infinispan.util.Util;
+
+import java.io.IOException;
+import java.io.ObjectInput;
+import java.io.ObjectOutput;
+import java.util.Set;
 
 /**
  * @author pedro
@@ -40,5 +48,34 @@ public class InternalMVCCEntry {
                 .append(",version=").append(visible)
                 .append(",mostRecent?=").append(mostRecent)
                 .append("}").toString();
+    }
+
+    public static class Externalizer extends AbstractExternalizer<InternalMVCCEntry> {
+
+        @Override
+        public Set<Class<? extends InternalMVCCEntry>> getTypeClasses() {
+            return Util.<Class<? extends InternalMVCCEntry>>asSet(InternalMVCCEntry.class);
+        }
+
+        @Override
+        public void writeObject(ObjectOutput output, InternalMVCCEntry object) throws IOException {
+            output.writeObject(object.value);
+            output.writeObject(object.visible);
+            output.writeBoolean(object.mostRecent);
+        }
+
+        @Override
+        public InternalMVCCEntry readObject(ObjectInput input) throws IOException, ClassNotFoundException {
+            InternalCacheEntry ice = (InternalCacheEntry) input.readObject();
+            VersionVC visible = (VersionVC) input.readObject();
+            boolean mostRecent = input.readBoolean();
+
+            return new InternalMVCCEntry(ice, visible, mostRecent);
+        }
+
+        @Override
+        public Integer getId() {
+            return Ids.INTERNAL_MVCC_ENTRY;
+        }
     }
 }

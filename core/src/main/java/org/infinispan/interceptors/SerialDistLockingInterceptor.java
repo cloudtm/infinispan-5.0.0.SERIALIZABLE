@@ -10,6 +10,7 @@ import org.infinispan.container.entries.SerializableEntry;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.factories.annotations.Inject;
+import org.infinispan.factories.annotations.Start;
 import org.infinispan.mvcc.CommitQueue;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.util.ReversibleOrderedSet;
@@ -26,19 +27,33 @@ import java.util.Map;
 public class SerialDistLockingInterceptor extends DistLockingInterceptor implements CommitQueue.CommitInstance {
     private CommitQueue commitQueue;
 
+    private boolean debug, info;
+
     @Inject
     public void inject(CommitQueue commitQueue) {
         this.commitQueue = commitQueue;
     }
 
+    @Start
+    public void updateDebugBoolean() {
+        debug = log.isDebugEnabled();
+        info = log.isInfoEnabled();
+    }
+
     @Override
     public Object visitCommitCommand(TxInvocationContext ctx, CommitCommand command) throws Throwable {
+        if(trace) {
+            log.tracef("Commit Command received for transaction %s (%s)",
+                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
+                    (ctx.isOriginLocal() ? "local" : "remote"));
+        }
         try {
             return invokeNextInterceptor(ctx, command);
         } finally {
             if (ctx.isInTxScope()) {
                 try {
-                    boolean applied = commitQueue.updateAndWait(command.getGlobalTransaction(), command.getCommitVersion());
+                    boolean applied = commitQueue.updateAndWait(command.getGlobalTransaction(),
+                            command.getCommitVersion());
                     if(ctx.isOriginLocal()) {
                         if(applied) {
                             ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx);
@@ -48,6 +63,11 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
                         commitQueue.removeFirst();
                     }
                 } catch(Exception e) {
+                    if(debug) {
+                        log.debugf("An exception was caught in commit command (tx:%s, ex:%s)",
+                                Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
+                                e.getLocalizedMessage());
+                    }
                     commitQueue.remove(command.getGlobalTransaction());
                 }
             } else {
@@ -58,8 +78,13 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
 
     @Override
     public Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable {
-        commitQueue.remove(command.getGlobalTransaction());
+        if(trace) {
+            log.tracef("Rollback Command received for transaction %s (%s)",
+                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
+                    (ctx.isOriginLocal() ? "local" : "remote"));
+        }
         try {
+            commitQueue.remove(command.getGlobalTransaction());
             return invokeNextInterceptor(ctx, command);
         } finally {
             if (ctx.isInTxScope()) {
@@ -71,52 +96,90 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
     }
 
     @Override
-    public Object visitAcquireValidationLocksCommand(TxInvocationContext ctx, AcquireValidationLocksCommand command) throws Throwable {
-        ReadWriteLockManager rwlman = (ReadWriteLockManager) lockManager;
+    public Object visitAcquireValidationLocksCommand(TxInvocationContext ctx, AcquireValidationLocksCommand command)
+            throws Throwable {
+        if(trace) {
+            log.tracef("Acquire validation locks received for transaction %s",
+                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
+        }
+        ReadWriteLockManager RWLMan = (ReadWriteLockManager) lockManager;
         Object actualKeyInValidation = null;
         try {
-            log.debugf("validate transaction [%s] write set %s",
-                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), command.getWriteSet());
+            //first acquire the write locks. if it needs the read lock for a written key, then it will be no problem
+            //acquire it
+
+            if(debug) {
+                log.debugf("Acquire locks on transaction's [%s] write set %s",
+                        Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), command.getWriteSet());
+            }
+
             for(Object k : command.getWriteSet()) {
-                rwlman.lockAndRecord(k, ctx);
+                RWLMan.lockAndRecord(k, ctx);
                 if(!ctx.getLookedUpEntries().containsKey(k)) {
+                    //putLookedUpEntry can throw an exception. if k is not saved, then it will be locked forever
                     actualKeyInValidation = k;
-                    ctx.putLookedUpEntry(k, null); //to release later
+
+                    // put null initially. when the write commands will be replayed, they will overwrite it.
+                    // it is necessary to release later (if validation fails)
+                    ctx.putLookedUpEntry(k, null);
                 }
             }
 
-            log.debugf("validate transaction [%s] read set %s",
-                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), command.getReadSet());
+            if(debug) {
+                log.debugf("Acquire locks (and validate) on transaction's [%s] read set %s",
+                        Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), command.getReadSet());
+            }
+
             for(Object k : command.getReadSet()) {
-                rwlman.sharedLockAndRecord(k, ctx);
+                RWLMan.sharedLockAndRecord(k, ctx);
                 if(!ctx.getLookedUpEntries().containsKey(k)) {
+                    //see comments above
                     actualKeyInValidation = k;
-                    ctx.putLookedUpEntry(k, null); //same reason above (release later)
+                    ctx.putLookedUpEntry(k, null);
                 }
                 validateKey(k, command.getVersion());
             }
 
             actualKeyInValidation = null;
-            return invokeNextInterceptor(ctx, command); //it does no need to passes down in the chain
-        } catch(Throwable t) {
-            //if some exception occurs in method putLookedUpEntry
-            if(actualKeyInValidation != null) {
-                rwlman.unlock(actualKeyInValidation);
+            //it does no need to passes down in the chain
+            //but it is done to keep compatibility (or if we want to add a new interceptor later)
+            Object retVal =  invokeNextInterceptor(ctx, command);
+
+            if(info) {
+                log.infof("Validation of transaction [%s] succeeds",
+                        Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
             }
-            rwlman.unlock(ctx);
-            log.debugf("validation of transaction [%s] fails %s",
-                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), t.getMessage());
+
+            return retVal;
+        } catch(Throwable t) {
+            //if some exception occurs in method putLookedUpEntry this key must be unlocked too
+            if(actualKeyInValidation != null) {
+                RWLMan.unlock(actualKeyInValidation);
+            }
+
+            RWLMan.unlock(ctx);
+
+            if(info) {
+                log.infof("Validation of transaction [%s] fails. Reason: %s",
+                        Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), t.getMessage());
+            }
             throw t;
         }
     }
 
     protected void validateKey(Object key, VersionVC toCompare) {
-        if(!dataContainer.validateKey(key, 0, toCompare.get(0))) {
-            throw new CacheException("validation of key [" + key + "] failed!");
+        //it only needs to compare it own group id because it is guaranteed that this position is increase in
+        // each version!
+        int pos = getPositionInVC(key);
+        if(!dataContainer.validateKey(key, pos, toCompare.get(pos))) {
+            throw new CacheException("Validation of key [" + key + "] failed!");
         }
     }
 
     private void commitEntry(CacheEntry entry, VersionVC version) {
+        if(trace) {
+            log.tracef("Commit Entry %s with version %s", entry, version);
+        }
         if(entry instanceof SerializableEntry) {
             ((SerializableEntry) entry).commit(dataContainer, version);
         } else {
@@ -128,24 +191,31 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
         if (commit) {
             ReversibleOrderedSet<Map.Entry<Object, CacheEntry>> entries = ctx.getLookedUpEntries().entrySet();
             Iterator<Map.Entry<Object, CacheEntry>> it = entries.reverseIterator();
-            if (trace) log.tracef("Number of entries in context: %s", entries.size());
+            if (trace) {
+                log.tracef("Commit modifications. Number of entries in context: %s, commit version: %s",
+                        entries.size(), commitVersion);
+            }
             while (it.hasNext()) {
                 Map.Entry<Object, CacheEntry> e = it.next();
                 CacheEntry entry = e.getValue();
                 Object key = e.getKey();
-                // could be null with read-committed
+                // could be null (if it was read and not written)
                 if (entry != null && entry.isChanged()) {
                     commitEntry(entry, commitVersion);
                 } else {
-                    if (trace) log.tracef("Entry for key %s is null, not calling commitUpdate", key);
+                    if (trace) {
+                        log.tracef("Entry for key %s is null, not calling commitUpdate", key);
+                    }
                 }
             }
 
-            //commitVersion is null when the transaction is readonly
+            //commitVersion is null when the transaction is read-only
             if(ctx.isInTxScope() && commitVersion != null) {
                 ((MultiVersionDataContainer) dataContainer).addNewCommittedTransaction(commitVersion);
             }
-            ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx); //this not call the entry.rollback() (instead of releaseLocks(ctx))
+
+            //this not call the entry.rollback() (instead of releaseLocks(ctx))
+            ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx);
 
         } else {
             lockManager.releaseLocks(ctx);
@@ -158,5 +228,9 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
         } else {
             cleanupLocks(ctx, true, commitVersion);
         }
+    }
+
+    private int getPositionInVC(Object key) {
+        return dm.locateGroup(key).getId();
     }
 }

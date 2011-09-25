@@ -4,6 +4,7 @@ import org.infinispan.CacheException;
 import org.infinispan.commands.tx.PrepareCommand;
 import org.infinispan.context.impl.LocalTxInvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
+import org.infinispan.factories.annotations.Start;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.responses.ExceptionResponse;
 import org.infinispan.remoting.responses.Response;
@@ -23,11 +24,23 @@ import java.util.Set;
  */
 public class SerialDistributionInterceptor extends DistributionInterceptor {
 
+    private boolean info, debug;
+
+    @Start
+    public void setLogBoolean() {
+        info = log.isInfoEnabled();
+        debug = log.isDebugEnabled();
+    }
+
     @Override
     public Object visitPrepareCommand(TxInvocationContext ctx, PrepareCommand command) throws Throwable {
         Object retVal = invokeNextInterceptor(ctx, command);
 
         if (shouldInvokeRemoteTxCommand(ctx)) {
+            if(info) {
+                log.infof("Prepare Command received for %s and it will be multicast",
+                        Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
+            }
 
             //obtain all keys (read and write set)
             Set<Object> allKeys = new HashSet<Object>(ctx.getAffectedKeys());
@@ -35,6 +48,12 @@ public class SerialDistributionInterceptor extends DistributionInterceptor {
 
             //get the member to contact
             List<Address> recipients = dm.getAffectedNodes(allKeys);
+
+            if(debug) {
+                log.debugf("Transaction %s accessed keys are %s and involved replicas are %s",
+                        Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
+                        allKeys, recipients);
+            }
 
             //something about L1 cache
             NotifyingNotifiableFuture<Object> f = null;
@@ -47,9 +66,11 @@ public class SerialDistributionInterceptor extends DistributionInterceptor {
             //something...
             ((LocalTxInvocationContext) ctx).remoteLocksAcquired(recipients);
 
-            log.debugf("broadcast prepare command for transaction %s. responses are: %s",
-                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
-                    responses.toString());
+            if(debug) {
+                log.debugf("Prepare Command multicasted for transaction %s and the responses are: %s",
+                        Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
+                        responses.toString());
+            }
 
             if (!responses.isEmpty()) {
                 VersionVC allPreparedVC = new VersionVC();
@@ -59,16 +80,22 @@ public class SerialDistributionInterceptor extends DistributionInterceptor {
                     if (r instanceof SuccessfulResponse) {
                         VersionVC preparedVC = (VersionVC) ((SuccessfulResponse) r).getResponseValue();
                         allPreparedVC.setToMaximum(preparedVC);
-                        log.debugf("[%s] received response %s. all vector clock together is %s",
-                                Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
-                                preparedVC, allPreparedVC);
                     } else if(r instanceof ExceptionResponse) {
-                        log.debugf("[%s] received a negative response %s",
-                                Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),r);
-                        throw ((ExceptionResponse) r).getException();
+                        Exception e = ((ExceptionResponse) r).getException();
+
+                        if(info) {
+                            log.infof("Transaction %s received a negative response %s (reason:%s) and it must be aborted",
+                                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), r,
+                                    e.getLocalizedMessage());
+                        }
+
+                        throw e;
                     } else if(!r.isSuccessful()) {
-                        log.debugf("[%s] received a negative response %s",
-                                Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),r);
+                        if(info) {
+                            log.debugf("Transaction %s received an unsuccessful response %s and it mus be aborted",
+                                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), r);
+                        }
+
                         throw new CacheException("Unsuccessful response received... aborting transaction " +
                                 Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
                     }
@@ -76,11 +103,20 @@ public class SerialDistributionInterceptor extends DistributionInterceptor {
 
                 //this has the maximum vector clock of all
                 retVal = allPreparedVC;
+                if(info) {
+                    log.infof("Transaction %s receive only positive votes and it can commit. Prepare version is %s",
+                            Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), allPreparedVC);
+                }
             }
 
 
             if (f != null) {
                 f.get();
+            }
+        } else {
+            if(info) {
+                log.infof("Prepare Command received for %s and it will *NOT* be multicast",
+                        Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
             }
         }
         return retVal;

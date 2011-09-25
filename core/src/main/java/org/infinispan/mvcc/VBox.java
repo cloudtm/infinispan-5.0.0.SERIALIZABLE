@@ -54,8 +54,16 @@ public class VBox {
     public String getVBoxChain() {
         return new StringBuilder("VBox{")
                 .append("version=").append(version)
-                .append("value=").append(value).append("};")
+                .append(",value=").append(value).append("};")
                 .append(previous != null ? previous.getVBoxChain() : "null")
                 .toString();
+    }
+
+    @Override
+    public String toString() {
+        return new StringBuilder("VBox{")
+                .append("version=").append(version)
+                .append(",value=").append(value)
+                .append('}').toString();
     }
 }

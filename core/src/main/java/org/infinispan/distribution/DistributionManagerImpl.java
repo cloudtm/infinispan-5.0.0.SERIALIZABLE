@@ -65,6 +65,7 @@ import org.infinispan.remoting.rpc.RpcManager;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.remoting.transport.Transport;
 import org.infinispan.totalorder.TotalOrderTransactionManager;
+import org.infinispan.util.Util;
 import org.infinispan.util.concurrent.IsolationLevel;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
@@ -286,8 +287,8 @@ public class DistributionManagerImpl implements DistributionManager {
         ClusteredGetCommand get = cf.buildClusteredGetCommand(key, ctx.getFlags());
 
         ReplGroup rg = locateGroup(key);
-        VersionVC maxToRead = null;
-        long minVersion = 0;
+        VersionVC maxToRead;
+        long minVersion;
 
         if(ctx.isInTxScope()) {
             maxToRead = ctx.calculateVersionToRead();
@@ -295,6 +296,12 @@ public class DistributionManagerImpl implements DistributionManager {
 
             get.setMaxVersion(maxToRead);
             get.setMinVersion(minVersion);
+
+            if(log.isDebugEnabled()) {
+                log.debugf("Perform a remote get for transaction %s. Key: %s, min version: %s, max version: %s",
+                        Util.prettyPrintGlobalTransaction(((LocalTxInvocationContext) ctx).getGlobalTransaction()),
+                        key, minVersion, maxToRead);
+            }
         }
 
         ResponseFilter filter = new ClusteredGetResponseValidityFilter(rg.getMembers());
@@ -309,6 +316,11 @@ public class DistributionManagerImpl implements DistributionManager {
                         if(ctx.isInTxScope()) {
                             ctx.addReadKey(key, ime);
                             ((LocalTxInvocationContext) ctx).markReadFrom(rg.getId());
+                            if(log.isDebugEnabled()) {
+                                log.debugf("Remote Get successful for transaction %s and key %s. Return value is %s",
+                                        Util.prettyPrintGlobalTransaction(((LocalTxInvocationContext) ctx).
+                                                getGlobalTransaction()), key, ime);
+                            }
                         }
                         return ime.getValue();
                     } else {
