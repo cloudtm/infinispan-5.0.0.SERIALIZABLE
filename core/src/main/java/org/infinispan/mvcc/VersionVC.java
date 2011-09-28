@@ -27,7 +27,7 @@ public class VersionVC implements Externalizable, Serializable {
      * @param other vector clock to compare
      * @return true if *this* vector clock is less or equals to the *other* vector clock
      */
-    public boolean isLessOrEquals(VersionVC other) {
+    public boolean isBefore(VersionVC other) {
         if(other == null) {
             return true;
         }
@@ -45,14 +45,7 @@ public class VersionVC implements Externalizable, Serializable {
         return true;
     }
 
-    /**
-     * Compares two vector clocks ands returns true if *this* is less than the *other*.
-     * For any two vector clocks, v1 and v2,v1 is less than v2 iff for each position i,
-     * v1[i] < v2[i] || v1[i] == null || v2[i] == null
-     * @param other vector clock to compare
-     * @return true if *this* vector clock is less to the *other* vector clock
-     */
-    public boolean isLessThan(VersionVC other) {
+    public boolean isAfter(VersionVC other) {
         if(other == null) {
             return true;
         }
@@ -63,25 +56,7 @@ public class VersionVC implements Externalizable, Serializable {
         for(Integer pos : keySet) {
             long otherValue = other.get(pos);
             long myValue = this.get(pos);
-            if(otherValue != EMPTY_POSITION && myValue != EMPTY_POSITION && myValue >= otherValue) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    public boolean isGreaterThan(VersionVC other) {
-        if(other == null) {
-            return true;
-        }
-
-        Set<Integer> keySet = new HashSet<Integer>(other.vectorClock.keySet());
-        keySet.addAll(this.vectorClock.keySet());
-
-        for(Integer pos : keySet) {
-            long otherValue = other.get(pos);
-            long myValue = this.get(pos);
-            if(otherValue != EMPTY_POSITION && myValue != EMPTY_POSITION && myValue <= otherValue) {
+            if(otherValue != EMPTY_POSITION && myValue != EMPTY_POSITION && myValue < otherValue) {
                 return false;
             }
         }
@@ -203,4 +178,8 @@ public class VersionVC implements Externalizable, Serializable {
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
         readExternal(in);
     }*/
+
+    public void clean() {
+        vectorClock.clear();
+    }
 }

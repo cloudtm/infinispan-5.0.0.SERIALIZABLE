@@ -64,7 +64,7 @@ public class MultiVersionDataContainer implements DataContainer {
     private VBox getFromMap(Object k, VersionVC max) {
         VBox vbox = entries.get(k);
         while(vbox != null) {
-            if(vbox.getVersion().isLessOrEquals(max)) {
+            if(vbox.getVersion().isBefore(max)) {
                 break;
             } else {
                 vbox = vbox.getPrevious();
@@ -149,7 +149,7 @@ public class MultiVersionDataContainer implements DataContainer {
         }
         if(debug) {
             log.debugf("get key [%s] with max vector clock of %s. returned value is %s",
-                    k, max, ime.getValue().getValue());
+                    k, max, (ime.getValue() !=  null ? ime.getValue().getValue() : "null"));
         }
         return ime;
     }
@@ -161,7 +161,7 @@ public class MultiVersionDataContainer implements DataContainer {
         InternalMVCCEntry ime = wrap(vbox, visible, vbox == entries.get(k), false, true);
         if(debug) {
             log.debugf("peek key [%s] with max vector clock of %s. returned value is %s",
-                    k, max, ime.getValue().getValue());
+                    k, max, (ime.getValue() !=  null ? ime.getValue().getValue() : "null"));
         }
         return ime;
     }
@@ -283,7 +283,7 @@ public class MultiVersionDataContainer implements DataContainer {
             Object key = entry.getKey();
             VBox value = entry.getValue();
             while(value != null) {
-                if(value.getVersion().isLessOrEquals(max)) {
+                if(value.getVersion().isBefore(max)) {
                     result.add(key);
                     break;
                 }
@@ -320,7 +320,7 @@ public class MultiVersionDataContainer implements DataContainer {
         }
         for (Iterator<VBox> purgeCandidates = entries.values().iterator(); purgeCandidates.hasNext();) {
             VBox vbox = purgeCandidates.next();
-            if (vbox.getVersion().isLessOrEquals(version) && vbox.isExpired()) {
+            if (vbox.getVersion().isBefore(version) && vbox.isExpired()) {
                 purgeCandidates.remove();
             }
         }
@@ -337,6 +337,10 @@ public class MultiVersionDataContainer implements DataContainer {
 
     public void addNewCommittedTransaction(VersionVC newVersion) {
         commitLog.addNewVersion(newVersion);
+    }
+
+    public void addNewCommittedTransaction(List<VersionVC> newsVersions) {
+        commitLog.addNewVersion(newsVersions);
     }
 
     @Override
@@ -508,7 +512,7 @@ public class MultiVersionDataContainer implements DataContainer {
             while(currentIterator.hasNext()) {
                 VBox vbox = currentIterator.next();
                 while(vbox != null) {
-                    if(vbox.getVersion().isLessOrEquals(max)) {
+                    if(vbox.getVersion().isBefore(max)) {
                         next = vbox;
                         return;
                     } else {

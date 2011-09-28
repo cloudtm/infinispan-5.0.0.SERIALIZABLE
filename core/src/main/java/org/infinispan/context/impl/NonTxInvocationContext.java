@@ -110,6 +110,11 @@ public class NonTxInvocationContext extends AbstractInvocationContext {
         if (lookedUpEntries != null) {
             dolly.lookedUpEntries = new BidirectionalLinkedHashMap<Object, CacheEntry>(lookedUpEntries);
         }
+        if(readKeys != null) {
+            dolly.readKeys = new HashMap<Object, InternalMVCCEntry>(readKeys);
+        }
+        dolly.readBasedOnVersion = readBasedOnVersion;
+        dolly.versionVC = versionVC;
         return dolly;
     }
 

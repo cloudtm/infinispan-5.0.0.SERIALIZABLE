@@ -4,7 +4,6 @@ import org.infinispan.context.InvocationContext;
 import org.infinispan.context.InvocationContextContainer;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.factories.annotations.Start;
-import org.infinispan.factories.annotations.Stop;
 import org.infinispan.interceptors.InterceptorChain;
 import org.infinispan.interceptors.LockingInterceptor;
 import org.infinispan.interceptors.base.CommandInterceptor;
@@ -14,6 +13,7 @@ import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
 
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
 
@@ -28,7 +28,6 @@ public class CommitQueue {
     private final VersionVC prepareVC;
     private final ArrayList<ListEntry> commitQueue;
     private CommitInstance commitInvocationInstance;
-    private final ApplyRemoteModificationThread applyThread;
     private InterceptorChain ic;
     private InvocationContextContainer icc;
 
@@ -37,7 +36,6 @@ public class CommitQueue {
     public CommitQueue() {
         prepareVC = new VersionVC();
         commitQueue = new ArrayList<ListEntry>();
-        applyThread = new ApplyRemoteModificationThread();
     }
 
     private int searchInsertIndex(VersionVC vc) {
@@ -49,12 +47,60 @@ public class CommitQueue {
         ListEntry le;
         while(lit.hasNext()) {
             le = lit.next();
-            if(le.commitVC.isGreaterThan(vc)) {
+            if(le.commitVC.isAfter(vc)) {
                 return idx;
             }
             idx++;
         }
         return idx;
+    }
+
+    //a transaction can commit if it is ready, it is on head of the queue and
+    //  the following transactions has a version higher than this one
+    //if the following transactions has the same vector clock, then their must be ready to commit
+    //  and their modifications will be batched with this transaction
+
+    //return values:
+    //   -2: not ready to commit (must wait)
+    //   -1: it was already committed (can be removed)
+    //    n (>=0): it is ready to commit and commits the 'n'th following txs
+
+    //WARNING: it is assumed that this is called inside a synchronized block!!
+    private int getCommitCode(GlobalTransaction gtx) {
+        ListEntry toSearch = new ListEntry();
+        toSearch.gtx = gtx;
+        int idx = commitQueue.indexOf(toSearch);
+        if(idx < 0) {
+            return -1;
+        } else if(idx > 0) {
+            return -2;
+        }
+
+        toSearch = commitQueue.get(0);
+
+        if(toSearch.applied) {
+            return -1;
+        }
+
+        VersionVC tempCommitVC = toSearch.commitVC;
+
+        int queueSize = commitQueue.size();
+        idx = 1;
+
+        while(idx < queueSize) {
+            ListEntry other = commitQueue.get(idx);
+            if(tempCommitVC.isEquals(other.commitVC)) {
+                if(!other.ready) {
+                    return -2;
+                }
+                tempCommitVC.setToMaximum(other.commitVC);
+                idx++;
+            } else {
+                break;
+            }
+        }
+
+        return idx - 1;
     }
 
     @Inject
@@ -86,16 +132,6 @@ public class CommitQueue {
         }
         if(commitInvocationInstance == null) {
             throw new NullPointerException("Commit Invocation Instance must not be null in serializable mode.");
-        }
-        if(!applyThread.run) {
-            applyThread.start();
-        }
-    }
-
-    @Stop
-    public void stop() {
-        if(applyThread.run) {
-            applyThread.interrupt();
         }
     }
 
@@ -140,9 +176,9 @@ public class CommitQueue {
      * @param gtx the transaction identifier
      * @param commitVC the commit vector clock
      * @throws InterruptedException if it is interrupted
-     * @return true if the modification was already applied
      */
-    public boolean updateAndWait(GlobalTransaction gtx, VersionVC commitVC) throws InterruptedException {
+    //v2: commits the keys too!!
+    public void updateAndWait(GlobalTransaction gtx, VersionVC commitVC) throws InterruptedException {
 
         synchronized (prepareVC) {
             prepareVC.setToMaximum(commitVC);
@@ -151,11 +187,17 @@ public class CommitQueue {
                         prepareVC);
             }
         }
+        List<ListEntry> toCommit = new LinkedList<ListEntry>();
 
-        ListEntry toSearch = new ListEntry();
-        toSearch.gtx = gtx;
         synchronized (commitQueue) {
+            ListEntry toSearch = new ListEntry();
+            toSearch.gtx = gtx;
             int idx = commitQueue.indexOf(toSearch);
+
+            if(idx == -1) {
+                return ;
+            }
+
             ListEntry le = commitQueue.get(idx);
             if(!commitVC.isEquals(le.commitVC)) {
                 commitQueue.remove(idx);
@@ -173,68 +215,57 @@ public class CommitQueue {
             le.ready = true;
             commitQueue.notifyAll();
 
-            if(le.gtx.isRemote()) {
-                if(trace) {
-                    log.tracef("Transaction [%s] is remote... don't wait", Util.prettyPrintGlobalTransaction(gtx));
-                }
-                return false; //don't wait (don't care about the return value)
-            }
-
             while(true) {
 
-                if(idx != 0) {
-                    if(debug) {
-                        log.debugf("Transaction [%s] is not on head of the queue. Waiting for its turn. Queue is %s",
-                                Util.prettyPrintGlobalTransaction(gtx), commitQueue.toString());
-                    }
+                int commitCode = getCommitCode(gtx);
+
+                if(commitCode == -2) { //it is not it turn
                     commitQueue.wait();
-                    idx = commitQueue.indexOf(toSearch);
-                } else {
-                    if(debug) {
-                        log.debugf("Transaction [%s] is on head of the queue. Queue is %s",
-                                Util.prettyPrintGlobalTransaction(gtx), commitQueue.toString());
+                    continue;
+                } else if(commitCode == -1) { //already committed
+                    if(commitQueue.remove(le)) {
+                        commitQueue.notifyAll();
                     }
+                    return;
                 }
 
-                if(idx == 0 && commitQueue.size() > 1) {
-                    ListEntry other = commitQueue.get(1);
-                    if(debug) {
-                        log.debugf("Compare entries for batching. %s and %s", le, other);
-                    }
-                    if(other.commitVC.isEquals(le.commitVC)) {
-                        //both has the same commit vector clock... we need to wrap this transaction in one
-                        if(!other.ready) {
-                            if(trace) {
-                                log.tracef("compare entries %s and %s ==> same vector clock, but other is not ready",
-                                        le, other);
-                            }
-                            idx = -1; //other is not ready... the vector clock can change. we must sure
-                            // if they are different or not
-                        } else {
-                            if(trace) {
-                                log.tracef("compare entries %s and %s ==> same vector clock, and other is ready",
-                                        le, other);
-                            }
-                            //the other is ready and with the same vector clock... grab the modification and join to
-                            //this transaction
-                            le.ctx.putLookedUpEntries(other.ctx.getLookedUpEntries());
-                            other.applied = true;
-                        }
-                    }
+                if(commitCode >= commitQueue.size()) {
+                    log.warnf("The commit code received is higher than the size of commit queue (%s > %s)",
+                            commitCode, commitQueue.size());
+                    commitCode = commitQueue.size() - 1;
                 }
 
-                if(idx == 0) {
-                    if(debug) {
-                        log.debugf("Transaction [%s] is on head of the queue. The modification %s applied! Queue is %s",
-                                Util.prettyPrintGlobalTransaction(gtx),
-                                (le.applied ? "are" : "are not"),
-                                commitQueue.toString());
-                    }
-                    return le.applied;
-                }
+                toCommit.addAll(commitQueue.subList(0, commitCode + 1));
+                break;
+            }
+            if(debug) {
+                log.debugf("Transaction %s will apply it write set now. Queue state is %s",
+                        Util.prettyPrintGlobalTransaction(le.gtx), commitQueue.toString());
             }
         }
 
+        if(debug) {
+            log.debugf("This thread will aplly the write set of " + toCommit);
+        }
+
+        List<VersionVC> committedTxVersionVC = new LinkedList<VersionVC>();
+        InvocationContext thisCtx = icc.suspend();
+        for(ListEntry le : toCommit) {
+            icc.resume(le.ctx);
+            commitInvocationInstance.commit(le.ctx, le.commitVC);
+            icc.suspend();
+            le.applied = true;
+            committedTxVersionVC.add(le.commitVC);
+        }
+        icc.resume(thisCtx);
+
+        commitInvocationInstance.addTransaction(committedTxVersionVC);
+
+        synchronized (commitQueue) {
+            if(commitQueue.removeAll(toCommit)) {
+                commitQueue.notifyAll();
+            }
+        }
     }
 
     /**
@@ -311,66 +342,9 @@ public class CommitQueue {
         }
     }
 
-    private class ApplyRemoteModificationThread extends Thread {
-        private volatile boolean run = false;
-
-        public ApplyRemoteModificationThread() {
-            super("Apply-Remote-Modification-Thread");
-        }
-
-        @Override
-        public void run() {
-            run = true;
-            while(run) {
-                try {
-                    ListEntry le;
-                    synchronized (commitQueue) {
-                        if(commitQueue.isEmpty()) {
-                            if(trace) {
-                                log.tracef("Commit Queue is empty. waiting for something...");
-                            }
-                            commitQueue.wait();
-                            continue;
-                        }
-                        le = commitQueue.get(0);
-                        if(!le.gtx.isRemote() || !le.ready) {
-                            if(trace) {
-                                log.tracef("Head of commit queue [%s] is local or it is not ready. " +
-                                        "waiting for something...", le);
-                            }
-                            commitQueue.wait();
-                            continue;
-                        }
-                    }
-
-                    try {
-                        icc.resume(le.ctx);
-                        if(debug) {
-                            log.debugf("Commit modifications for transaction %s",
-                                    Util.prettyPrintGlobalTransaction(le.gtx));
-                        }
-                        commitInvocationInstance.commit(le.ctx, le.commitVC, le.applied);
-                    } finally {
-                        icc.suspend();
-                        removeFirst();
-                    }
-                } catch (InterruptedException e) {
-                    log.warnf("Interrupted Exception caught on Apply-Remote-Modification-Thread");
-                    //no-op
-                } catch (Throwable t) {
-                    log.warnf("Exception caught on Apply-Remote-Modification-Thread [%s]", t.getLocalizedMessage());
-                }
-            }
-        }
-
-        @Override
-        public void interrupt() {
-            run = false;
-            super.interrupt();
-        }
-    }
-
     public static interface CommitInstance {
-        void commit(InvocationContext ctx, VersionVC commitVersion, boolean applied);
+        void commit(InvocationContext ctx, VersionVC commitVersion);
+        void addTransaction(VersionVC commitVC);
+        void addTransaction(List<VersionVC> commitVC);
     }
 }

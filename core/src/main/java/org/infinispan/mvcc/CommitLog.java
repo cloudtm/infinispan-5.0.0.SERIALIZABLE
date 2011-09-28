@@ -6,7 +6,8 @@ import org.infinispan.factories.annotations.Stop;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
 
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * @author pedro
@@ -15,83 +16,110 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 public class CommitLog {
     private static final Log log = LogFactory.getLog(CommitLog.class);
 
-    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
-    private VersionEntry actual;
+    private final AtomicReference<VersionEntry> chainOfVersion;
+    private final VersionVC actual;
     private final Object versionChangeNotifier = new Object();
 
     private boolean debug;
 
     public CommitLog() {
-        actual = new VersionEntry();
-        actual.version = new VersionVC();
+        chainOfVersion = new AtomicReference<VersionEntry>(null);
+        VersionEntry ve = new VersionEntry();
+        ve.version = VersionVC.EMPTY_VERSION;
+        actual = new VersionVC();
+        chainOfVersion.set(ve);
     }
 
     @Start
     public void start() {
-        if(actual == null) {
-            actual = new VersionEntry();
-            actual.version = new VersionVC();
+        if(chainOfVersion.get() == null) {
+            VersionEntry ve = new VersionEntry();
+            ve.version = VersionVC.EMPTY_VERSION;
+            chainOfVersion.compareAndSet(null, ve);
+            actual.clean();
         }
         debug = log.isDebugEnabled();
     }
 
     @Stop
     public void stop() {
-        actual = null;
+        chainOfVersion.set(null);
     }
 
     public VersionVC getActualVersion() {
-        try {
-            lock.readLock().lock();
-            return actual.version;
-        } finally {
-            lock.readLock().unlock();
+        synchronized (actual) {
+            return actual.copy();
         }
     }
 
     public VersionVC getMostRecentLessOrEqualThan(VersionVC other) {
-        try {
-            lock.readLock().lock();
-            VersionEntry it = actual;
-            while(it != null) {
-                if(it.version.isLessOrEquals(other)) {
-                    if(debug) {
-                        log.debugf("Get version less or equal than %s. return value is %s",
-                                other, it.version);
-                    }
-                    return it.version;
+        VersionEntry it = chainOfVersion.get();
+        while(it != null) {
+            if(it.version == VersionVC.EMPTY_VERSION) {
+                return (other != null ? other.copy() : it.version.copy());
+            } else if(it.version.isBefore(other)) {
+                if(debug) {
+                    log.debugf("Get version less or equal than %s. return value is %s",
+                            other, it.version);
                 }
-                it = it.previous;
+                return it.version.copy();
             }
+            it = it.previous;
+        }
 
+        if(debug) {
+            log.debugf("Get version less or equal than %s. return value is null",
+                    other);
+        }
+        return null;
+    }
+
+    public synchronized void addNewVersion(VersionVC other) {
+        VersionEntry actualEntry;
+        VersionEntry ve = new VersionEntry();
+        ve.version = other.copy();
+
+        do {
+            actualEntry = chainOfVersion.get();
+            ve.previous = actualEntry;
+        } while(!chainOfVersion.compareAndSet(actualEntry, ve));
+
+        synchronized (actual) {
+            actual.setToMaximum(other);
+            actual.notifyAll();
             if(debug) {
-                log.debugf("Get version less or equal than %s. return value is null",
-                        other);
+                log.debugf("Added new version[%s] to commit log. actual version is %s",
+                        other, actual);
             }
-            return null;
-        } finally {
-            lock.readLock().unlock();
         }
     }
 
-    public void addNewVersion(VersionVC other) {
-        try {
-            lock.writeLock().lock();
-            VersionVC newVersion = other.copy();
-            newVersion.setToMaximum(actual.version);
+    public synchronized void addNewVersion(List<VersionVC> committedTxVersion) {
+        if(committedTxVersion == null || committedTxVersion.isEmpty()) {
+            return ;
+        }
+
+        VersionVC toUpdateActual = new VersionVC();
+        for(VersionVC other : committedTxVersion) {
+            VersionEntry actualEntry;
             VersionEntry ve = new VersionEntry();
-            ve.version = other;
-            ve.previous = actual;
-            actual = ve;
-            synchronized (versionChangeNotifier) {
-                versionChangeNotifier.notifyAll();
-            }
-        } finally {
+            ve.version = other.copy();
+
+            do {
+                actualEntry = chainOfVersion.get();
+                ve.previous = actualEntry;
+            } while(!chainOfVersion.compareAndSet(actualEntry, ve));
+
+            toUpdateActual.setToMaximum(other);
+        }
+
+        synchronized (actual) {
+            actual.setToMaximum(toUpdateActual);
+            actual.notifyAll();
             if(debug) {
-                log.debugf("Added new version to commit log. actual version is %s",
-                        actual.version);
+                log.debugf("Added news versions [%s] to commit log. actual version is %s",
+                        committedTxVersion, actual);
             }
-            lock.writeLock().unlock();
         }
     }
 
@@ -121,8 +149,8 @@ public class CommitLog {
             if(version.get(position) >= minVersion) {
                 return true;
             }
-            synchronized (versionChangeNotifier) {
-                versionChangeNotifier.wait(finalTimeout - System.currentTimeMillis());
+            synchronized (actual) {
+                actual.wait(finalTimeout - System.currentTimeMillis());
             }
         } while(System.currentTimeMillis() < finalTimeout);
 

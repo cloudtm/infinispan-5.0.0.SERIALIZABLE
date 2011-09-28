@@ -1,21 +1,16 @@
 package org.infinispan.container;
 
-import org.infinispan.CacheException;
 import org.infinispan.config.Configuration;
 import org.infinispan.container.entries.*;
 import org.infinispan.context.Flag;
 import org.infinispan.context.InvocationContext;
-import org.infinispan.context.impl.NonTxInvocationContext;
-import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.marshall.MarshalledValue;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.notifications.cachelistener.CacheNotifier;
-import org.infinispan.transaction.xa.InvalidTransactionException;
 import org.infinispan.util.Util;
 import org.infinispan.util.concurrent.TimeoutException;
-import org.infinispan.util.concurrent.locks.LockManager;
 import org.infinispan.util.concurrent.locks.readwritelock.ReadWriteLockManager;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
@@ -200,6 +195,7 @@ public class MultiVersionEntryFactoryImpl implements EntryFactory {
                     ctx.addReadKey(key,ime);
                     ctx.putLookedUpEntry(key, mvccEntry);
                 }
+
                 return mvccEntry;
             } else {
                 cacheEntry = container.get(key);

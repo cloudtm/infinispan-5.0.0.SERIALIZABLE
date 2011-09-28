@@ -23,16 +23,16 @@
 
 package org.infinispan.context;
 
-import java.util.Collection;
-import java.util.EnumSet;
-import java.util.Map;
-import java.util.Set;
-
 import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.util.BidirectionalMap;
+
+import java.util.Collection;
+import java.util.EnumSet;
+import java.util.Map;
+import java.util.Set;
 
 
 /**
@@ -201,4 +201,11 @@ public class InvocationContextFlagsOverride implements InvocationContext {
       return new InvocationContextFlagsOverride(delegate, flags);
    }
 
+    @Override
+    public String toString() {
+        return new StringBuilder("InvocationContextFlagsOverride{")
+                .append("delegate=").append(delegate)
+                .append(",flags=").append(flags)
+                .append("}").toString();
+    }
 }

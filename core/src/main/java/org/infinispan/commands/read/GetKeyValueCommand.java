@@ -22,9 +22,6 @@
  */
 package org.infinispan.commands.read;
 
-import java.util.Collections;
-import java.util.Set;
-
 import org.infinispan.commands.Visitor;
 import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.context.Flag;
@@ -32,6 +29,9 @@ import org.infinispan.context.InvocationContext;
 import org.infinispan.notifications.cachelistener.CacheNotifier;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
+
+import java.util.Collections;
+import java.util.Set;
 
 /**
  * Implements functionality defined by {@link org.infinispan.Cache#get(Object)} and
@@ -71,6 +71,7 @@ public class GetKeyValueCommand extends AbstractDataCommand {
    @Override
    public Object perform(InvocationContext ctx) throws Throwable {
       CacheEntry entry = ctx.lookupEntry(key);
+
       if (entry == null || entry.isNull()) {
          if (trace) {
             log.trace("Entry not found");

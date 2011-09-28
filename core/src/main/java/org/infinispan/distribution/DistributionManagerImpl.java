@@ -64,7 +64,6 @@ import org.infinispan.remoting.rpc.ResponseMode;
 import org.infinispan.remoting.rpc.RpcManager;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.remoting.transport.Transport;
-import org.infinispan.totalorder.TotalOrderTransactionManager;
 import org.infinispan.util.Util;
 import org.infinispan.util.concurrent.IsolationLevel;
 import org.infinispan.util.logging.Log;
@@ -302,18 +301,34 @@ public class DistributionManagerImpl implements DistributionManager {
                         Util.prettyPrintGlobalTransaction(((LocalTxInvocationContext) ctx).getGlobalTransaction()),
                         key, minVersion, maxToRead);
             }
+        } else {
+            if(log.isDebugEnabled()) {
+                log.debugf("Perform a remote get in non-transactional context. key is %s", key);
+            }
         }
 
         ResponseFilter filter = new ClusteredGetResponseValidityFilter(rg.getMembers());
         Map<Address, Response> responses = rpcManager.invokeRemotely(locate(key), get, ResponseMode.SYNCHRONOUS,
                 configuration.getSyncReplTimeout(), false, filter);
 
+        if(ctx.isInTxScope()) {
+            if(log.isDebugEnabled()) {
+                log.debugf("Remote get done for transaction %s [key:%s]. response are: %s",
+                        Util.prettyPrintGlobalTransaction(((LocalTxInvocationContext) ctx).getGlobalTransaction()),
+                        key, responses);
+            }
+        } else {
+            if(log.isDebugEnabled()) {
+                log.debugf("Remote get done for non-transaction context [key:%s]. response are: %s", key, responses);
+            }
+        }
+
         if (!responses.isEmpty()) {
             for (Response r : responses.values()) {
                 if (r instanceof SuccessfulResponse) {
                     if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
-                        InternalMVCCEntry ime = (InternalMVCCEntry) ((SuccessfulResponse) r).getResponseValue();
                         if(ctx.isInTxScope()) {
+                            InternalMVCCEntry ime = (InternalMVCCEntry) ((SuccessfulResponse) r).getResponseValue();
                             ctx.addReadKey(key, ime);
                             ((LocalTxInvocationContext) ctx).markReadFrom(rg.getId());
                             if(log.isDebugEnabled()) {
@@ -321,8 +336,15 @@ public class DistributionManagerImpl implements DistributionManager {
                                         Util.prettyPrintGlobalTransaction(((LocalTxInvocationContext) ctx).
                                                 getGlobalTransaction()), key, ime);
                             }
+                            return ime.getValue();
+                        } else {
+                            InternalCacheValue cacheValue = (InternalCacheValue) ((SuccessfulResponse) r).getResponseValue();
+                            if(log.isDebugEnabled()) {
+                                log.debugf("Remote Get successful for non-transactional context and key %s. " +
+                                        "Return value is %s", key, cacheValue);
+                            }
+                            return cacheValue.toInternalCacheEntry(key);
                         }
-                        return ime.getValue();
                     } else {
                         InternalCacheValue cacheValue = (InternalCacheValue) ((SuccessfulResponse) r).getResponseValue();
                         return cacheValue.toInternalCacheEntry(key);

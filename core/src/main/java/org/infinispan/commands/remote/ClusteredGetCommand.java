@@ -25,15 +25,10 @@ package org.infinispan.commands.remote;
 import org.infinispan.commands.CommandsFactory;
 import org.infinispan.commands.FlagAffectedCommand;
 import org.infinispan.commands.read.GetKeyValueCommand;
-import org.infinispan.container.entries.CacheEntry;
-import org.infinispan.container.entries.InternalCacheEntry;
-import org.infinispan.container.entries.InternalCacheValue;
-import org.infinispan.container.entries.InternalEntryFactory;
-import org.infinispan.container.entries.MVCCEntry;
+import org.infinispan.container.entries.*;
 import org.infinispan.context.Flag;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.context.InvocationContextContainer;
-import org.infinispan.context.impl.NonTxInvocationContext;
 import org.infinispan.distribution.DistributionManager;
 import org.infinispan.interceptors.InterceptorChain;
 import org.infinispan.mvcc.CommitLog;
@@ -113,8 +108,10 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
         GetKeyValueCommand command = commandsFactory.buildGetKeyValueCommand(key, commandFlags);
         command.setReturnCacheEntry(true);
         InvocationContext invocationContext = icc.createRemoteInvocationContextForCommand(command, getOrigin());
+        boolean useMultiVersion = false;
 
         if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE && maxVersion != null) {
+            useMultiVersion = true;
             invocationContext.setReadBasedOnVersion(true);
             invocationContext.setVersionToRead(maxVersion);
 
@@ -129,21 +126,22 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
             }
         }
 
-        CacheEntry cacheEntry = (CacheEntry) invoker.invoke(invocationContext, command);
+        Object cacheEntry = invoker.invoke(invocationContext, command);
+
         if (cacheEntry == null) {
             if (trace) log.trace("Did not find anything, returning null");
             return null;
         }
 
-        if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
-            InternalMVCCEntry ime = invocationContext.getReadKey(key); //all data needed is here. just send it back
+        if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE && useMultiVersion) {
+            InternalMVCCEntry ime = (InternalMVCCEntry) cacheEntry;
             if(log.isInfoEnabled()) {
                 log.infof("Receive remote get request [key: %s, min version: %s, max version: %s] and return value is %s",
                         key, minVersion, maxVersion, ime);
             }
             return ime;
         } else {
-            return getValueForWeakConsistency(cacheEntry);
+            return getValueForWeakConsistency((CacheEntry) cacheEntry);
         }
 
         //TODO with serializability:

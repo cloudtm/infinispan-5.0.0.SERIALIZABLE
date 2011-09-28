@@ -30,7 +30,7 @@ public class InternalMVCCEntry {
     }
 
     public InternalCacheEntry getValue() {
-        return value;
+        return (value != null ? value.clone() : null);
     }
 
     public VersionVC getVersion() {

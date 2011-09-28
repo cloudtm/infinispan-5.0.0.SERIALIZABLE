@@ -63,7 +63,7 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
         Set<Object> writeSet = getOnlyLocalKeys(command.getAffectedKeys());
         Set<Object> readSet = getOnlyLocalKeys(command.getReadSet());
 
-        if(ctx.isOriginLocal() && writeSet.isEmpty()) {
+        if(ctx.isOriginLocal() && command.getAffectedKeys().isEmpty()) {
             if(debug) {
                 log.debugf("Transaction [%s] is read-only and it wants to prepare. ignore it and return.",
                         Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
@@ -188,8 +188,10 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
                 }
 
                 if(debug) {
-                    log.debugf("Transaction [%s] read key %s and visible vector clock is %s (Group ID: %s)",
-                            gtxID, command.getKey(), v, pos);
+                    log.debugf("Transaction [%s] read key [%s] and visible vector clock is %s (Group_ID: %s)." +
+                            "return value is %s",
+                            gtxID, command.getKey(), v, pos,
+                            ime.getValue() != null ? ime.getValue().getValue() : "null");
                 }
                 txctx.updateVectorClock(v);
             }
@@ -197,10 +199,13 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
 
         //remote get
         if(!ctx.isOriginLocal()) {
-            InternalMVCCEntry ime = ctx.getReadKey(command.getKey());
-            retVal = ime;
             if(debug) {
-                log.debugf("Remote Get received. return value is %s", ime);
+                log.debugf("Remote Get received for key %s. return value is %s. Multi Version return is %s",
+                        command.getKey(), retVal, ctx.getReadKey(command.getKey()));
+            }
+
+            if(ctx.readBasedOnVersion()) {
+                retVal = ctx.getReadKey(command.getKey());
             }
         }
 

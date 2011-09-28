@@ -1,6 +1,7 @@
 package org.infinispan.interceptors;
 
 import org.infinispan.CacheException;
+import org.infinispan.commands.read.GetKeyValueCommand;
 import org.infinispan.commands.tx.AcquireValidationLocksCommand;
 import org.infinispan.commands.tx.CommitCommand;
 import org.infinispan.commands.tx.RollbackCommand;
@@ -9,16 +10,19 @@ import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.container.entries.SerializableEntry;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
+import org.infinispan.distribution.DistributionManager;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.factories.annotations.Start;
+import org.infinispan.marshall.MarshalledValue;
+import org.infinispan.mvcc.CommitLog;
 import org.infinispan.mvcc.CommitQueue;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.util.ReversibleOrderedSet;
 import org.infinispan.util.Util;
+import org.infinispan.util.concurrent.TimeoutException;
 import org.infinispan.util.concurrent.locks.readwritelock.ReadWriteLockManager;
 
-import java.util.Iterator;
-import java.util.Map;
+import java.util.*;
 
 /**
  * @author pruivo
@@ -26,18 +30,39 @@ import java.util.Map;
  */
 public class SerialDistLockingInterceptor extends DistLockingInterceptor implements CommitQueue.CommitInstance {
     private CommitQueue commitQueue;
+    private DistributionManager distributionManager;
 
     private boolean debug, info;
+    private CommitLog commitLog;
 
     @Inject
-    public void inject(CommitQueue commitQueue) {
+    public void inject(CommitQueue commitQueue, DistributionManager distributionManager, CommitLog commitLog) {
         this.commitQueue = commitQueue;
+        this.distributionManager = distributionManager;
+        this.commitLog = commitLog;
     }
 
     @Start
     public void updateDebugBoolean() {
         debug = log.isDebugEnabled();
         info = log.isInfoEnabled();
+    }
+
+    @Override
+    public Object visitGetKeyValueCommand(InvocationContext ctx, GetKeyValueCommand command) throws Throwable {
+        if(ctx.isInTxScope()) {
+            int pos = getPositionInVC(command.getKey());
+            TxInvocationContext txctx = (TxInvocationContext) ctx;
+            long min = txctx.getVectorClockValueIn(pos);
+            if(isKeyLocal(command.getKey()) && !commitLog.waitUntilMinVersionIsGuaranteed(min, pos,
+                    configuration.getSyncReplTimeout() * 3)) {
+                log.warnf("Try to read the key [%s] (local) but the min version is not guaranteed!",
+                        command.getKey());
+                throw new TimeoutException("Cannot read the key " + command.getKey());
+            }
+        }
+
+        return super.visitGetKeyValueCommand(ctx, command);    //To change body of overridden methods use File | Settings | File Templates.
     }
 
     @Override
@@ -51,27 +76,26 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
             return invokeNextInterceptor(ctx, command);
         } finally {
             if (ctx.isInTxScope()) {
-                try {
-                    boolean applied = commitQueue.updateAndWait(command.getGlobalTransaction(),
-                            command.getCommitVersion());
-                    if(ctx.isOriginLocal()) {
-                        if(applied) {
-                            ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx);
-                        } else {
-                            cleanupLocks(ctx, true, command.getCommitVersion());
+                if(getOnlyLocalKeys(ctx.getAffectedKeys()).isEmpty()) {
+                    ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx);
+                } else {
+                    try {
+                        commitQueue.updateAndWait(command.getGlobalTransaction(), command.getCommitVersion());
+
+                        ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx);
+                    } catch(Exception e) {
+                        if(debug) {
+                            log.debugf("An exception was caught in commit command (tx:%s, ex: %s: %s)",
+                                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
+                                    e.getClass().getName(), e.getMessage());
                         }
-                        commitQueue.removeFirst();
+                        e.printStackTrace();
+                        commitQueue.remove(command.getGlobalTransaction());
                     }
-                } catch(Exception e) {
-                    if(debug) {
-                        log.debugf("An exception was caught in commit command (tx:%s, ex:%s)",
-                                Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
-                                e.getLocalizedMessage());
-                    }
-                    commitQueue.remove(command.getGlobalTransaction());
                 }
             } else {
-                throw new IllegalStateException("Attempting to do a commit or rollback but there is no transactional context in scope. " + ctx);
+                throw new IllegalStateException("Attempting to do a commit or rollback but there is no transactional " +
+                        "context in scope. " + ctx);
             }
         }
     }
@@ -90,7 +114,8 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
             if (ctx.isInTxScope()) {
                 cleanupLocks(ctx, false, null);
             } else {
-                throw new IllegalStateException("Attempting to do a commit or rollback but there is no transactional context in scope. " + ctx);
+                throw new IllegalStateException("Attempting to do a commit or rollback but there is no transactional " +
+                        "context in scope. " + ctx);
             }
         }
     }
@@ -114,7 +139,15 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
             }
 
             for(Object k : command.getWriteSet()) {
-                RWLMan.lockAndRecord(k, ctx);
+                if(!RWLMan.lockAndRecord(k, ctx)) {
+                    Object owner = lockManager.getOwner(k);
+                    // if lock cannot be acquired, expose the key itself, not the marshalled value
+                    if (k instanceof MarshalledValue) {
+                        k = ((MarshalledValue) k).get();
+                    }
+                    throw new TimeoutException("Unable to acquire lock on key [" + k + "] for requestor [" +
+                            ctx.getLockOwner() + "]! Lock held by [" + owner + "]");
+                }
                 if(!ctx.getLookedUpEntries().containsKey(k)) {
                     //putLookedUpEntry can throw an exception. if k is not saved, then it will be locked forever
                     actualKeyInValidation = k;
@@ -131,7 +164,15 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
             }
 
             for(Object k : command.getReadSet()) {
-                RWLMan.sharedLockAndRecord(k, ctx);
+                if(!RWLMan.sharedLockAndRecord(k, ctx)) {
+                    Object owner = lockManager.getOwner(k);
+                    // if lock cannot be acquired, expose the key itself, not the marshalled value
+                    if (k instanceof MarshalledValue) {
+                        k = ((MarshalledValue) k).get();
+                    }
+                    throw new TimeoutException("Unable to acquire lock on key [" + k + "] for requestor [" +
+                            ctx.getLockOwner() + "]! Lock held by [" + owner + "]");
+                }
                 if(!ctx.getLookedUpEntries().containsKey(k)) {
                     //see comments above
                     actualKeyInValidation = k;
@@ -180,10 +221,22 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
         if(trace) {
             log.tracef("Commit Entry %s with version %s", entry, version);
         }
-        if(entry instanceof SerializableEntry) {
-            ((SerializableEntry) entry).commit(dataContainer, version);
+        boolean doCommit = true;
+        if (!dm.getLocality(entry.getKey()).isLocal()) {
+            if (configuration.isL1CacheEnabled()) {
+                dm.transformForL1(entry);
+            } else {
+                doCommit = false;
+            }
+        }
+        if (doCommit) {
+            if(entry instanceof SerializableEntry) {
+                ((SerializableEntry) entry).commit(dataContainer, version);
+            } else {
+                entry.commit(dataContainer);
+            }
         } else {
-            entry.commit(dataContainer);
+            entry.rollback();
         }
     }
 
@@ -222,15 +275,59 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
         }
     }
 
-    public void commit(InvocationContext ctx, VersionVC commitVersion, boolean applied) {
-        if(applied) {
-            ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx);
-        } else {
-            cleanupLocks(ctx, true, commitVersion);
+    /**
+     *
+     * @param keys keys to check
+     * @return return only the local key or empty if it has no one
+     */
+    private Set<Object> getOnlyLocalKeys(Set<Object> keys) {
+        Set<Object> localKeys = new HashSet<Object>();
+        for(Object key : keys) {
+            if(distributionManager.getLocality(key).isLocal()) {
+                localKeys.add(key);
+            }
         }
+        return localKeys;
+    }
+
+    @Override
+    public void commit(InvocationContext ctx, VersionVC commitVersion) {
+        ReversibleOrderedSet<Map.Entry<Object, CacheEntry>> entries = ctx.getLookedUpEntries().entrySet();
+        Iterator<Map.Entry<Object, CacheEntry>> it = entries.reverseIterator();
+        if (trace) {
+            log.tracef("Commit modifications. Number of entries in context: %s, commit version: %s",
+                    entries.size(), commitVersion);
+        }
+        while (it.hasNext()) {
+            Map.Entry<Object, CacheEntry> e = it.next();
+            CacheEntry entry = e.getValue();
+            Object key = e.getKey();
+            // could be null (if it was read and not written)
+            if (entry != null && entry.isChanged()) {
+                commitEntry(entry, commitVersion);
+            } else {
+                if (trace) {
+                    log.tracef("Entry for key %s is null, not calling commitUpdate", key);
+                }
+            }
+        }
+    }
+
+    @Override
+    public void addTransaction(VersionVC commitVC) {
+        ((MultiVersionDataContainer) dataContainer).addNewCommittedTransaction(commitVC);
+    }
+
+    @Override
+    public void addTransaction(List<VersionVC> commitVC) {
+        ((MultiVersionDataContainer) dataContainer).addNewCommittedTransaction(commitVC);
     }
 
     private int getPositionInVC(Object key) {
         return dm.locateGroup(key).getId();
+    }
+
+    private boolean isKeyLocal(Object key) {
+        return distributionManager.getLocality(key).isLocal();
     }
 }

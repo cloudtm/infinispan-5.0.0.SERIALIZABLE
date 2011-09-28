@@ -10,13 +10,16 @@ import org.infinispan.container.entries.SerializableEntry;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.factories.annotations.Inject;
+import org.infinispan.marshall.MarshalledValue;
 import org.infinispan.mvcc.CommitQueue;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.util.ReversibleOrderedSet;
 import org.infinispan.util.Util;
+import org.infinispan.util.concurrent.TimeoutException;
 import org.infinispan.util.concurrent.locks.readwritelock.ReadWriteLockManager;
 
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -39,16 +42,11 @@ public class SerialLockingInterceptor extends LockingInterceptor implements Comm
         } finally {
             if (ctx.isInTxScope()) {
                 try {
-                    boolean applied = commitQueue.updateAndWait(command.getGlobalTransaction(), command.getCommitVersion());
-                    if(ctx.isOriginLocal()) {
-                        if(applied) {
-                            ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx);
-                        } else {
-                            cleanupLocks(ctx, true, command.getCommitVersion());
-                        }
-                        commitQueue.removeFirst();
-                    }
+                    commitQueue.updateAndWait(command.getGlobalTransaction(), command.getCommitVersion());
+
+                    ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx);
                 } catch(Exception e) {
+                    e.printStackTrace();
                     commitQueue.remove(command.getGlobalTransaction());
                 }
             } else {
@@ -79,7 +77,15 @@ public class SerialLockingInterceptor extends LockingInterceptor implements Comm
             log.debugf("validate transaction [%s] write set %s",
                     Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), command.getWriteSet());
             for(Object k : command.getWriteSet()) {
-                rwlman.lockAndRecord(k, ctx);
+                if(!rwlman.lockAndRecord(k, ctx)) {
+                    Object owner = lockManager.getOwner(k);
+                    // if lock cannot be acquired, expose the key itself, not the marshalled value
+                    if (k instanceof MarshalledValue) {
+                        k = ((MarshalledValue) k).get();
+                    }
+                    throw new TimeoutException("Unable to acquire lock on key [" + k + "] for requestor [" +
+                            ctx.getLockOwner() + "]! Lock held by [" + owner + "]");
+                }
                 if(!ctx.getLookedUpEntries().containsKey(k)) {
                     actualKeyInValidation = k;
                     ctx.putLookedUpEntry(k, null); //to release later
@@ -89,7 +95,15 @@ public class SerialLockingInterceptor extends LockingInterceptor implements Comm
             log.debugf("validate transaction [%s] read set %s",
                     Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()), command.getReadSet());
             for(Object k : command.getReadSet()) {
-                rwlman.sharedLockAndRecord(k, ctx);
+                if(!rwlman.sharedLockAndRecord(k, ctx)) {
+                    Object owner = lockManager.getOwner(k);
+                    // if lock cannot be acquired, expose the key itself, not the marshalled value
+                    if (k instanceof MarshalledValue) {
+                        k = ((MarshalledValue) k).get();
+                    }
+                    throw new TimeoutException("Unable to acquire lock on key [" + k + "] for requestor [" +
+                            ctx.getLockOwner() + "]! Lock held by [" + owner + "]");
+                }
                 if(!ctx.getLookedUpEntries().containsKey(k)) {
                     actualKeyInValidation = k;
                     ctx.putLookedUpEntry(k, null); //same reason above (release later)
@@ -154,11 +168,35 @@ public class SerialLockingInterceptor extends LockingInterceptor implements Comm
     }
 
     @Override
-    public void commit(InvocationContext ctx, VersionVC commitVersion, boolean applied) {
-        if(applied) {
-            ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx);
-        } else {
-            cleanupLocks(ctx, true, commitVersion);
+    public void commit(InvocationContext ctx, VersionVC commitVersion) {
+        ReversibleOrderedSet<Map.Entry<Object, CacheEntry>> entries = ctx.getLookedUpEntries().entrySet();
+        Iterator<Map.Entry<Object, CacheEntry>> it = entries.reverseIterator();
+        if (trace) {
+            log.tracef("Commit modifications. Number of entries in context: %s, commit version: %s",
+                    entries.size(), commitVersion);
         }
+        while (it.hasNext()) {
+            Map.Entry<Object, CacheEntry> e = it.next();
+            CacheEntry entry = e.getValue();
+            Object key = e.getKey();
+            // could be null (if it was read and not written)
+            if (entry != null && entry.isChanged()) {
+                commitEntry(entry, commitVersion);
+            } else {
+                if (trace) {
+                    log.tracef("Entry for key %s is null, not calling commitUpdate", key);
+                }
+            }
+        }
+    }
+
+    @Override
+    public void addTransaction(VersionVC commitVC) {
+        ((MultiVersionDataContainer) dataContainer).addNewCommittedTransaction(commitVC);
+    }
+
+    @Override
+    public void addTransaction(List<VersionVC> commitVC) {
+        ((MultiVersionDataContainer) dataContainer).addNewCommittedTransaction(commitVC);
     }
 }
