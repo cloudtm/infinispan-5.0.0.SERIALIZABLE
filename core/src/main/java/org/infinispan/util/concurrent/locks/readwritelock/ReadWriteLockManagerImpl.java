@@ -13,7 +13,6 @@ import org.infinispan.jmx.annotations.MBean;
 import org.infinispan.jmx.annotations.ManagedAttribute;
 import org.infinispan.transaction.xa.GlobalTransaction;
 import org.infinispan.util.ReversibleOrderedSet;
-import org.infinispan.util.Util;
 import org.infinispan.util.concurrent.locks.containers.readwritelock.*;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
@@ -25,7 +24,6 @@ import javax.transaction.TransactionManager;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -191,8 +189,6 @@ public class ReadWriteLockManagerImpl implements ReadWriteLockManager {
                 Object k = e.getKey();
                 if (trace) log.tracef("Attempting to unlock %s", k);
 
-                log.warnf("%s release the write and read lock over %s",
-                        ctx.getLockOwner(), k);
                 try {
                     lockContainer.releaseSharedLock(k);
                 } catch (IllegalMonitorStateException imse) {
@@ -268,9 +264,6 @@ public class ReadWriteLockManagerImpl implements ReadWriteLockManager {
 
             if (trace) log.tracef("Releasing lock on [%s] for owner %s", key, owner);
 
-            log.warnf("%s release the write and read lock over %s",
-                        owner, key);
-
             //first release the read lock and then the write lock... the lock acquisition is done
             //in the reverse order, ie, first the write and then the read.
             try {
@@ -303,9 +296,6 @@ public class ReadWriteLockManagerImpl implements ReadWriteLockManager {
                 if (trace) {
                     log.tracef("Attempting to unlock %s", k);
                 }
-
-                log.warnf("%s release the write and read lock over %s",
-                        ctx.getLockOwner(), k);
 
                 //first release the read lock and then the write lock... the lock acquisition is done
                 //in the reverse order, ie, first the write and then the read.

@@ -25,10 +25,8 @@ package org.infinispan.remoting.transport.jgroups;
 import org.infinispan.CacheException;
 import org.infinispan.commands.ReplicableCommand;
 import org.infinispan.commands.remote.CacheRpcCommand;
-import org.infinispan.commands.tx.CommitCommand;
-import org.infinispan.commands.tx.RollbackCommand;
-import org.infinispan.commands.tx.TotalOrderPrepareCommand;
-import org.infinispan.commands.tx.VoteCommand;
+import org.infinispan.commands.remote.ClusteredGetCommand;
+import org.infinispan.commands.tx.*;
 import org.infinispan.remoting.InboundInvocationHandler;
 import org.infinispan.remoting.RpcException;
 import org.infinispan.remoting.responses.ExceptionResponse;
@@ -48,6 +46,7 @@ import org.jgroups.blocks.RpcDispatcher;
 import org.jgroups.blocks.RspFilter;
 import org.jgroups.groups.GroupAddress;
 import org.jgroups.util.*;
+import org.rhq.helpers.pluginAnnotations.agent.Parameter;
 
 import java.io.NotSerializableException;
 import java.util.*;
@@ -55,6 +54,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static java.lang.String.format;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -77,6 +77,15 @@ public class CommandAwareRpcDispatcher extends RpcDispatcher {
 
     //pedro
     private boolean totalOrderBased;
+
+    private boolean statisticsEnabled = true;
+
+    private final AtomicLong prepareCommandBytes = new AtomicLong(0);
+    private final AtomicLong commitCommandBytes = new AtomicLong(0);
+    private final AtomicLong clusteredGetKeyCommandBytes = new AtomicLong(0);
+    private final AtomicLong nrPrepareCommand = new AtomicLong(0);
+    private final AtomicLong nrCommitCommand = new AtomicLong(0);
+    private final AtomicLong nrClusteredGetKeyCommand = new AtomicLong(0);
 
     public CommandAwareRpcDispatcher(Channel channel,
                                      JGroupsTransport transport,
@@ -230,6 +239,20 @@ public class CommandAwareRpcDispatcher extends RpcDispatcher {
                 e.printStackTrace();
                 throw new RuntimeException("Failure to marshal argument(s)", e);
             }
+
+            if(statisticsEnabled) {
+                if(command instanceof PrepareCommand) {
+                    prepareCommandBytes.addAndGet(buf.getLength());
+                    nrPrepareCommand.incrementAndGet();
+                } else if(command instanceof CommitCommand) {
+                    commitCommandBytes.addAndGet(buf.getLength());
+                    nrCommitCommand.incrementAndGet();
+                } else if(command instanceof ClusteredGetCommand) {
+                    clusteredGetKeyCommandBytes.addAndGet(buf.getLength());
+                    nrClusteredGetKeyCommand.incrementAndGet();
+                }
+            }
+
             return buf;
         }
 
@@ -496,7 +519,44 @@ public class CommandAwareRpcDispatcher extends RpcDispatcher {
                 }
             }
         }
+    }
 
+    public void setStatisticsEnabled(boolean statisticsEnabled) {
+        this.statisticsEnabled = statisticsEnabled;
+    }
+
+
+    public void resetStatistics() {
+        prepareCommandBytes.set(0);
+        commitCommandBytes.set(0);
+        clusteredGetKeyCommandBytes.set(0);
+        nrPrepareCommand.set(0);
+        nrCommitCommand.set(0);
+        nrClusteredGetKeyCommand.set(0);
+    }
+
+    public long getPrepareCommandBytes() {
+        return prepareCommandBytes.get();
+    }
+
+    public long getCommitCommandBytes() {
+        return commitCommandBytes.get();
+    }
+
+    public long getClusteredGetKeyCommandBytes() {
+        return clusteredGetKeyCommandBytes.get();
+    }
+
+    public long getNrPrepareCommand() {
+        return nrPrepareCommand.get();
+    }
+
+    public long getNrCommitCommand() {
+        return nrCommitCommand.get();
+    }
+
+    public long getNrClusteredGetKeyCommand() {
+        return nrClusteredGetKeyCommand.get();
     }
 }
 

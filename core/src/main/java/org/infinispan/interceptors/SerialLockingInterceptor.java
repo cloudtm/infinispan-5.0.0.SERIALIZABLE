@@ -1,6 +1,5 @@
 package org.infinispan.interceptors;
 
-import org.infinispan.CacheException;
 import org.infinispan.commands.tx.AcquireValidationLocksCommand;
 import org.infinispan.commands.tx.CommitCommand;
 import org.infinispan.commands.tx.RollbackCommand;
@@ -13,6 +12,7 @@ import org.infinispan.factories.annotations.Inject;
 import org.infinispan.marshall.MarshalledValue;
 import org.infinispan.mvcc.CommitQueue;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.exception.ValidationException;
 import org.infinispan.util.ReversibleOrderedSet;
 import org.infinispan.util.Util;
 import org.infinispan.util.concurrent.TimeoutException;
@@ -127,7 +127,7 @@ public class SerialLockingInterceptor extends LockingInterceptor implements Comm
 
     protected void validateKey(Object key, VersionVC toCompare) {
         if(!dataContainer.validateKey(key, 0, toCompare.get(0))) {
-            throw new CacheException("validation of key [" + key + "] failed!");
+            throw new ValidationException("validation of key [" + key + "] failed!");
         }
     }
 

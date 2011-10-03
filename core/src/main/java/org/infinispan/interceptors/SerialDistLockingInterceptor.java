@@ -1,6 +1,5 @@
 package org.infinispan.interceptors;
 
-import org.infinispan.CacheException;
 import org.infinispan.commands.read.GetKeyValueCommand;
 import org.infinispan.commands.tx.AcquireValidationLocksCommand;
 import org.infinispan.commands.tx.CommitCommand;
@@ -17,6 +16,7 @@ import org.infinispan.marshall.MarshalledValue;
 import org.infinispan.mvcc.CommitLog;
 import org.infinispan.mvcc.CommitQueue;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.exception.ValidationException;
 import org.infinispan.util.ReversibleOrderedSet;
 import org.infinispan.util.Util;
 import org.infinispan.util.concurrent.TimeoutException;
@@ -213,7 +213,7 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
         // each version!
         int pos = getPositionInVC(key);
         if(!dataContainer.validateKey(key, pos, toCompare.get(pos))) {
-            throw new CacheException("Validation of key [" + key + "] failed!");
+            throw new ValidationException("Validation of key [" + key + "] failed!");
         }
     }
 

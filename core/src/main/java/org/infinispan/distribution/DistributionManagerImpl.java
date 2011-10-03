@@ -68,13 +68,11 @@ import org.infinispan.util.Util;
 import org.infinispan.util.concurrent.IsolationLevel;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
-import org.rhq.helpers.pluginAnnotations.agent.DataType;
-import org.rhq.helpers.pluginAnnotations.agent.Metric;
-import org.rhq.helpers.pluginAnnotations.agent.Operation;
-import org.rhq.helpers.pluginAnnotations.agent.Parameter;
+import org.rhq.helpers.pluginAnnotations.agent.*;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.infinispan.context.Flag.*;
 
@@ -131,6 +129,11 @@ public class DistributionManagerImpl implements DistributionManager {
     private volatile boolean joinComplete = false;
     private final CountDownLatch joinCompletedLatch = new CountDownLatch(1);
 
+    @ManagedAttribute(description = "Enables or disables the gathering of statistics by this component", writable = true)
+    private boolean statisticsEnabled;
+    private final AtomicLong roundTripTimeClusteredGet= new AtomicLong(0);
+    private final AtomicLong nrClusteredGet= new AtomicLong(0);
+
     /**
      * Default constructor
      */
@@ -175,6 +178,7 @@ public class DistributionManagerImpl implements DistributionManager {
         if (trace) log.trace("starting distribution manager on " + getMyAddress());
         notifier.addListener(listener);
         join();
+        setStatisticsEnabled(configuration.isExposeJmxStatistics());
     }
 
     private int getReplCount() {
@@ -308,8 +312,18 @@ public class DistributionManagerImpl implements DistributionManager {
         }
 
         ResponseFilter filter = new ClusteredGetResponseValidityFilter(rg.getMembers());
+
+        long start = System.nanoTime();
+
         Map<Address, Response> responses = rpcManager.invokeRemotely(locate(key), get, ResponseMode.SYNCHRONOUS,
                 configuration.getSyncReplTimeout(), false, filter);
+
+        if(statisticsEnabled) {
+            long end = System.nanoTime();
+            roundTripTimeClusteredGet.addAndGet(end - start);
+            nrClusteredGet.incrementAndGet();
+        }
+
 
         if(ctx.isInTxScope()) {
             if(log.isDebugEnabled()) {
@@ -612,5 +626,34 @@ public class DistributionManagerImpl implements DistributionManager {
 
     public void setConfiguration(Configuration configuration) {
         this.configuration = configuration;
+    }
+
+    @ManagedOperation(description = "Resets statistics gathered by this component")
+    @Operation(displayName = "Reset Statistics")
+    public void resetStatistics() {
+        roundTripTimeClusteredGet.set(0);
+        nrClusteredGet.set(0);
+    }
+
+    @Operation(displayName = "Enable/disable statistics")
+    public void setStatisticsEnabled(@Parameter(name = "enabled", description = "Whether statistics should be enabled or disabled (true/false)") boolean enabled) {
+        this.statisticsEnabled = enabled;
+    }
+
+    @Metric(displayName = "Statistics enabled", dataType = DataType.TRAIT)
+    public boolean isStatisticsEnabled() {
+        return this.statisticsEnabled;
+    }
+
+    @ManagedAttribute(description = "Round-Trip time of a clustered get key command since last reset")
+    @Metric(displayName = "RoundTripTimeClusteredGetKey", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getRoundTripTimeClusteredGetKey() {
+        return roundTripTimeClusteredGet.get();
+    }
+
+    @ManagedAttribute(description = "Number of clustered get key command sent since last reset")
+    @Metric(displayName = "NrClusteredGet", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getNrClusteredGet() {
+        return nrClusteredGet.get();
     }
 }

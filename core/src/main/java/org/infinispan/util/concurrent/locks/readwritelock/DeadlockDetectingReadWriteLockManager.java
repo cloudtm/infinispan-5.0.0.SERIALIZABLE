@@ -139,8 +139,6 @@ public class DeadlockDetectingReadWriteLockManager extends ReadWriteLockManagerI
                     Util.prettyPrintGlobalTransaction(thisTx), key);
             while (System.currentTimeMillis() < (start + lockTimeout)) {
                 if (lockContainer.acquireSharedLock(key, spinDuration, MILLISECONDS) != null) {
-                    log.warnf("%s SUCCESS acquire read lock over %s",
-                            Util.prettyPrintGlobalTransaction(thisTx), key);
                     thisTx.setLockIntention(null); //clear lock intention
                     if (trace) {
                         log.tracef("successfully acquired lock on %s, returning ...", key);
@@ -208,8 +206,6 @@ public class DeadlockDetectingReadWriteLockManager extends ReadWriteLockManagerI
                     Util.prettyPrintGlobalTransaction(thisTx), key);
             while (System.currentTimeMillis() < (start + lockTimeout)) {
                 if (lockContainer.acquireLock(key, spinDuration, MILLISECONDS) != null) {
-                    log.warnf("%s SUCCESS acquire write lock over %s",
-                            Util.prettyPrintGlobalTransaction(thisTx), key);
                     thisTx.setLockIntention(null); //clear lock intention
                     if (trace) {
                         log.tracef("successfully acquired lock on %s, returning ...", key);

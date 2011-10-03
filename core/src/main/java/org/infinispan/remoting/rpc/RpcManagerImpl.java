@@ -41,6 +41,7 @@ import org.infinispan.remoting.ReplicationQueue;
 import org.infinispan.remoting.responses.Response;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.remoting.transport.Transport;
+import org.infinispan.remoting.transport.jgroups.JGroupsTransport;
 import org.infinispan.statetransfer.StateTransferException;
 import org.infinispan.util.concurrent.NotifyingNotifiableFuture;
 import org.infinispan.util.logging.Log;
@@ -337,6 +338,9 @@ public class RpcManagerImpl implements RpcManager {
         replicationCount.set(0);
         replicationFailures.set(0);
         totalReplicationTime.set(0);
+        if(t instanceof JGroupsTransport) {
+            ((JGroupsTransport) t).getCommandAwareRpcDispatcher().resetStatistics();
+        }
     }
 
     @ManagedAttribute(description = "Number of successful replications")
@@ -365,6 +369,9 @@ public class RpcManagerImpl implements RpcManager {
     @Operation(displayName = "Enable/disable statistics")
     public void setStatisticsEnabled(@Parameter(name = "enabled", description = "Whether statistics should be enabled or disabled (true/false)") boolean statisticsEnabled) {
         this.statisticsEnabled = statisticsEnabled;
+        if(t instanceof JGroupsTransport) {
+            ((JGroupsTransport) t).getCommandAwareRpcDispatcher().setStatisticsEnabled(statisticsEnabled);
+        }
     }
 
     @ManagedAttribute(description = "Successful replications as a ratio of total replications")
@@ -405,5 +412,65 @@ public class RpcManagerImpl implements RpcManager {
     @Override
     public Address getAddress() {
         return t != null ? t.getAddress() : null;
+    }
+
+    @ManagedAttribute(description = "Ammount of bytes sent in prepare command since last reset")
+    @Metric(displayName = "PrepareCommandBytes", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getPrepareCommandBytes() {
+        if(t instanceof JGroupsTransport) {
+            return ((JGroupsTransport) t).getCommandAwareRpcDispatcher().getPrepareCommandBytes();
+        } else {
+            return 0;
+        }
+    }
+
+    @ManagedAttribute(description = "Ammount of bytes sent in commit command since last reset")
+    @Metric(displayName = "CommitCommandBytes", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getCommitCommandBytes() {
+        if(t instanceof JGroupsTransport) {
+            return ((JGroupsTransport) t).getCommandAwareRpcDispatcher().getCommitCommandBytes();
+        } else {
+            return 0;
+        }
+    }
+
+    @ManagedAttribute(description = "Ammount of bytes sent in clustered get key command since last reset")
+    @Metric(displayName = "ClusteredGetKeyCommandBytes", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getClusteredGetKeyCommandBytes() {
+        if(t instanceof JGroupsTransport) {
+            return ((JGroupsTransport) t).getCommandAwareRpcDispatcher().getClusteredGetKeyCommandBytes();
+        } else {
+            return 0;
+        }
+    }
+
+    @ManagedAttribute(description = "Number of prepare commands sent since last reset")
+    @Metric(displayName = "NrPrepareCommand", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getNrPrepareCommand() {
+        if(t instanceof JGroupsTransport) {
+            return ((JGroupsTransport) t).getCommandAwareRpcDispatcher().getNrPrepareCommand();
+        } else {
+            return 0;
+        }
+    }
+
+    @ManagedAttribute(description = "Number of commit commands sent since last reset")
+    @Metric(displayName = "NrCommitCommand", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getNrCommitCommand() {
+        if(t instanceof JGroupsTransport) {
+            return ((JGroupsTransport) t).getCommandAwareRpcDispatcher().getNrCommitCommand();
+        } else {
+            return 0;
+        }
+    }
+
+    @ManagedAttribute(description = "Number of clustered get key commands sent since last reset")
+    @Metric(displayName = "NrClusteredGetKeyCommand", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getNrClusteredGetKeyCommand() {
+        if(t instanceof JGroupsTransport) {
+            return ((JGroupsTransport) t).getCommandAwareRpcDispatcher().getNrClusteredGetKeyCommand();
+        } else {
+            return 0;
+        }
     }
 }
