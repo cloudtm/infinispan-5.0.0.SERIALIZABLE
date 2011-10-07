@@ -110,7 +110,7 @@ public class TransactionCoordinator {
             if(useSerializable) {
                 prepareCommand = commandsFactory.buildPrepareCommand(localTransaction.getGlobalTransaction(),
                         localTransaction.getModifications(), localTransaction.getReadSet(),
-                        ctx.calculateVersionToRead(), configuration.isOnePhaseCommit());
+                        ctx.getPrepareVersion(), configuration.isOnePhaseCommit());
             } else {
                 prepareCommand = commandsFactory.buildPrepareCommand(localTransaction.getGlobalTransaction(), localTransaction.getModifications(), configuration.isOnePhaseCommit());
             }

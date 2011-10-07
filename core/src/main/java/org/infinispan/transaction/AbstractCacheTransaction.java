@@ -145,4 +145,12 @@ public abstract class AbstractCacheTransaction implements CacheTransaction {
         }
         return vc;
     }
+
+    public VersionVC getPrepareVectorClock() {
+        return vectorClock.copy();
+    }
+
+    public VersionVC getMinVersion(Set<Integer> positions) {
+        return vectorClock.copy(positions);
+    }
 }

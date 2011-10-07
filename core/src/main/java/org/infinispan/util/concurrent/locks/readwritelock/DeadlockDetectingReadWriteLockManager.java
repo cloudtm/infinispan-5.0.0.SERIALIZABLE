@@ -6,7 +6,6 @@ import org.infinispan.jmx.annotations.MBean;
 import org.infinispan.jmx.annotations.ManagedAttribute;
 import org.infinispan.jmx.annotations.ManagedOperation;
 import org.infinispan.transaction.xa.DldGlobalTransaction;
-import org.infinispan.util.Util;
 import org.infinispan.util.concurrent.locks.DeadlockDetectedException;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
@@ -135,8 +134,6 @@ public class DeadlockDetectingReadWriteLockManager extends ReadWriteLockManagerI
                 log.tracef("Setting lock intention to: %s", key);
             }
 
-            log.warnf("%s is trying acquire read lock over %s",
-                    Util.prettyPrintGlobalTransaction(thisTx), key);
             while (System.currentTimeMillis() < (start + lockTimeout)) {
                 if (lockContainer.acquireSharedLock(key, spinDuration, MILLISECONDS) != null) {
                     thisTx.setLockIntention(null); //clear lock intention
@@ -162,14 +159,10 @@ public class DeadlockDetectingReadWriteLockManager extends ReadWriteLockManagerI
                         if (trace) {
                             log.tracef(message);
                         }
-                        log.warnf("%s DEADLOCK ON acquire read lock over %s",
-                                Util.prettyPrintGlobalTransaction(thisTx), key);
                         throw new DeadlockDetectedException(message);
                     }
                 }
             }
-            log.warnf("%s FAILS acquire read lock over %s",
-                Util.prettyPrintGlobalTransaction(thisTx), key);
         } else {
             if (lockContainer.acquireSharedLock(key, lockTimeout, MILLISECONDS) != null) {
                 return true;
@@ -202,8 +195,6 @@ public class DeadlockDetectingReadWriteLockManager extends ReadWriteLockManagerI
                 log.tracef("Setting lock intention to: %s", key);
             }
 
-            log.warnf("%s is trying acquire write lock over %s",
-                    Util.prettyPrintGlobalTransaction(thisTx), key);
             while (System.currentTimeMillis() < (start + lockTimeout)) {
                 if (lockContainer.acquireLock(key, spinDuration, MILLISECONDS) != null) {
                     thisTx.setLockIntention(null); //clear lock intention
@@ -230,14 +221,10 @@ public class DeadlockDetectingReadWriteLockManager extends ReadWriteLockManagerI
                             log.tracef(message);
                         }
 
-                        log.warnf("%s DEADLOCK ON acquire write lock over %s",
-                                Util.prettyPrintGlobalTransaction(thisTx), key);
                         throw new DeadlockDetectedException(message);
                     }
                 }
             }
-            log.warnf("%s FAILS acquire write lock over %s",
-                Util.prettyPrintGlobalTransaction(thisTx), key);
         } else {
             if (lockContainer.acquireLock(key, lockTimeout, MILLISECONDS) != null) {
                 return true;

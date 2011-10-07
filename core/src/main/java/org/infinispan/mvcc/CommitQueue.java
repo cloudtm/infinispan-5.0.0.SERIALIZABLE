@@ -198,13 +198,15 @@ public class CommitQueue {
                 return ;
             }
 
+            //update the position on the queue
             ListEntry le = commitQueue.get(idx);
-            if(!commitVC.isEquals(le.commitVC)) {
-                commitQueue.remove(idx);
-                le.commitVC = commitVC;
-                idx = searchInsertIndex(commitVC);
-                commitQueue.add(idx, le);
-            }
+            commitQueue.remove(idx);
+            le.commitVC = commitVC;
+            idx = searchInsertIndex(commitVC);
+            commitQueue.add(idx, le);
+
+            commitQueue.get(0).headStartTs = System.nanoTime();
+
 
             if(debug) {
                 log.debugf("Update transaction %s position in queue. Final index is %s and commit version is %s",
@@ -227,6 +229,11 @@ public class CommitQueue {
                         commitQueue.notifyAll();
                     }
                     return;
+                }
+
+                if(le.headStartTs != 0) {
+                    log.warnf("Transaction %s has %s nano seconds in the head of the queue",
+                            Util.prettyPrintGlobalTransaction(gtx), System.nanoTime() - le.headStartTs);
                 }
 
                 if(commitCode >= commitQueue.size()) {
@@ -264,6 +271,9 @@ public class CommitQueue {
         synchronized (commitQueue) {
             if(commitQueue.removeAll(toCommit)) {
                 commitQueue.notifyAll();
+            }
+            if(!commitQueue.isEmpty()) {
+                commitQueue.get(0).headStartTs = System.nanoTime();
             }
         }
     }
@@ -316,6 +326,7 @@ public class CommitQueue {
         private InvocationContext ctx;
         private volatile boolean ready = false;
         private volatile boolean applied = false;
+        private volatile long headStartTs = 0;
 
         @Override
         public boolean equals(Object o) {

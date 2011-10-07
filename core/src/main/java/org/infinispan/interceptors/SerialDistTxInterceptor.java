@@ -21,6 +21,7 @@ import org.infinispan.mvcc.CommitQueue;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.mvcc.exception.ValidationException;
+import org.infinispan.remoting.transport.Address;
 import org.infinispan.util.Util;
 import org.infinispan.util.concurrent.TimeoutException;
 import org.infinispan.util.concurrent.locks.DeadlockDetectedException;
@@ -30,6 +31,7 @@ import org.rhq.helpers.pluginAnnotations.agent.Metric;
 import org.rhq.helpers.pluginAnnotations.agent.Operation;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -90,6 +92,10 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
                         Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()));
             }
 
+            Set<Address> writeSetAddresses = new HashSet<Address>();
+            for(List<Address> laddr : distributionManager.locateAll(command.getAffectedKeys()).values()) {
+                writeSetAddresses.addAll(laddr);
+            }
             Set<Object> writeSet = getOnlyLocalKeys(command.getAffectedKeys());
             Set<Object> readSet = getOnlyLocalKeys(command.getReadSet());
 
@@ -126,7 +132,7 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
 
             if(!writeSet.isEmpty()) {
                 commitVC = commitQueue.addTransaction(command.getGlobalTransaction(), ctx.calculateVersionToRead(),
-                        icc.getInvocationContext().clone(), getVCPositions(writeSet));
+                        icc.getInvocationContext().clone(), distributionManager.getSelfID());
 
                 if(info) {
                     log.infof("Transaction %s can commit. It was added to commit queue. " +
@@ -152,7 +158,7 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
                 //this in only performed in the node that executed the transaction (I hope)
                 VersionVC othersCommitVC = (VersionVC) retVal;
                 commitVC.setToMaximum(othersCommitVC);
-                calculateCommitVC(commitVC, getVCPositions(writeSet));
+                calculateCommitVC(commitVC, getVCPositions(writeSetAddresses));
             }
 
             ctx.setCommitVersion(commitVC);
@@ -224,9 +230,12 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
             if(ctx.isInTxScope()) {
                 TxInvocationContext txctx = (TxInvocationContext) ctx;
                 String gtxID = Util.prettyPrintGlobalTransaction(txctx.getGlobalTransaction());
+                boolean isKeyLocal = isKeyLocal(command.getKey());
+                int pos = distributionManager.getSelfID();
 
-                int pos = getPositionInVC(command.getKey());
-                txctx.markReadFrom(pos);
+                if(isKeyLocal) {
+                    txctx.markReadFrom(pos);
+                }
 
                 //update vc
                 InternalMVCCEntry ime = ctx.getReadKey(command.getKey());
@@ -245,14 +254,14 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
                 } else {
                     VersionVC v = ime.getVersion();
 
-                    if(v.get(pos) == VersionVC.EMPTY_POSITION) {
+                    if(isKeyLocal && v.get(pos) == VersionVC.EMPTY_POSITION) {
                         v.set(pos,0);
                     }
 
                     if(debug) {
-                        log.debugf("Transaction [%s] read key [%s] and visible vector clock is %s (Group_ID: %s)." +
+                        log.debugf("Transaction [%s] read key [%s] and visible vector clock is %s." +
                                 "return value is %s",
-                                gtxID, command.getKey(), v, pos,
+                                gtxID, command.getKey(), v,
                                 ime.getValue() != null ? ime.getValue().getValue() : "null");
                     }
                     txctx.updateVectorClock(v);
@@ -286,6 +295,10 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
         }
     }
 
+    private boolean isKeyLocal(Object key) {
+        return distributionManager.getLocality(key).isLocal();
+    }
+
     /**
      *
      * @param keys keys to check
@@ -301,23 +314,19 @@ public class SerialDistTxInterceptor extends DistTxInterceptor {
         return localKeys;
     }
 
-    private Integer[] getVCPositions(Set<Object> writeSet) {
+    private Integer[] getVCPositions(Set<Address> writeSetMembers) {
         Set<Integer> positions = new HashSet<Integer>();
-        for(Object key : writeSet) {
-            positions.add(getPositionInVC(key));
+        for(Address addr : writeSetMembers) {
+            positions.add(distributionManager.getAddressID(addr));
         }
         Integer[] retVal = new Integer[positions.size()];
         positions.toArray(retVal);
 
         if(debug) {
-            log.debugf("Groups IDs for %s are %s", writeSet, retVal);
+            log.debugf("Address IDs for %s are %s", writeSetMembers, positions);
         }
 
         return retVal;
-    }
-
-    private int getPositionInVC(Object key) {
-        return distributionManager.locateGroup(key).getId();
     }
 
     private void calculateCommitVC(VersionVC vc, Integer[] writeGroups) {

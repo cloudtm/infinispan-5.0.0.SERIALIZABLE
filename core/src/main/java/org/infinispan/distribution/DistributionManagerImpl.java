@@ -288,14 +288,20 @@ public class DistributionManagerImpl implements DistributionManager {
 
     public InternalCacheEntry retrieveFromRemoteSource(Object key, InvocationContext ctx) throws Exception {
         ClusteredGetCommand get = cf.buildClusteredGetCommand(key, ctx.getFlags());
+        List<Address> destinations = locate(key);
 
-        ReplGroup rg = locateGroup(key);
         VersionVC maxToRead;
-        long minVersion;
+        VersionVC minVersion;
 
         if(ctx.isInTxScope()) {
+            Set<Integer> toReadFrom = new HashSet<Integer>();
+
+            for(Address addr : destinations) {
+                toReadFrom.add(getAddressID(addr));
+            }
+
             maxToRead = ctx.calculateVersionToRead();
-            minVersion = ((LocalTxInvocationContext)ctx).getVectorClockValueIn(rg.getId());
+            minVersion = ((LocalTxInvocationContext)ctx).getMinVersion(toReadFrom);
 
             get.setMaxVersion(maxToRead);
             get.setMinVersion(minVersion);
@@ -311,11 +317,11 @@ public class DistributionManagerImpl implements DistributionManager {
             }
         }
 
-        ResponseFilter filter = new ClusteredGetResponseValidityFilter(rg.getMembers());
+        ResponseFilter filter = new ClusteredGetResponseValidityFilter(destinations);
 
         long start = System.nanoTime();
 
-        Map<Address, Response> responses = rpcManager.invokeRemotely(locate(key), get, ResponseMode.SYNCHRONOUS,
+        Map<Address, Response> responses = rpcManager.invokeRemotely(destinations, get, ResponseMode.SYNCHRONOUS,
                 configuration.getSyncReplTimeout(), false, filter);
 
         if(statisticsEnabled) {
@@ -338,13 +344,14 @@ public class DistributionManagerImpl implements DistributionManager {
         }
 
         if (!responses.isEmpty()) {
-            for (Response r : responses.values()) {
+            for (Map.Entry<Address,Response> entry : responses.entrySet()) {
+                Response r = entry.getValue();
                 if (r instanceof SuccessfulResponse) {
                     if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
                         if(ctx.isInTxScope()) {
                             InternalMVCCEntry ime = (InternalMVCCEntry) ((SuccessfulResponse) r).getResponseValue();
                             ctx.addReadKey(key, ime);
-                            ((LocalTxInvocationContext) ctx).markReadFrom(rg.getId());
+                            ((LocalTxInvocationContext) ctx).markReadFrom(getAddressID(entry.getKey()));
                             if(log.isDebugEnabled()) {
                                 log.debugf("Remote Get successful for transaction %s and key %s. Return value is %s",
                                         Util.prettyPrintGlobalTransaction(((LocalTxInvocationContext) ctx).
@@ -522,6 +529,16 @@ public class DistributionManagerImpl implements DistributionManager {
     @Override
     public ReplGroup locateGroup(Object key) {
         return getConsistentHash().getGroupFor(key, getReplCount());
+    }
+
+    @Override
+    public int getAddressID(Address addr) {
+        return getConsistentHash().getHashId(addr);
+    }
+
+    @Override
+    public int getSelfID() {
+        return getAddressID(self);
     }
 
     @Listener

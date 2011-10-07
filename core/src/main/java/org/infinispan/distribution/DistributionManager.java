@@ -185,5 +185,15 @@ public interface DistributionManager {
     void markNodePushCompleted(int viewId, Address node);
 
     ReplGroup locateGroup(Object key);
+
+    /**
+     *
+     * @param addr
+     * @return
+     * @deprecated it does not works with virtual nodes!
+     */
+    int getAddressID(Address addr);
+
+    int getSelfID();
 }
 

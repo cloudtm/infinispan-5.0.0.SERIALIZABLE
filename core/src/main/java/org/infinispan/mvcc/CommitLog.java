@@ -125,13 +125,14 @@ public class CommitLog {
 
     /**
      *
-     * @param minVersion minimum version
+     * @param minVersionVC minimum version
      * @param position minimum version in this position of the vector clock
      * @param timeout timeout in milliseconds
      * @return true if the value is available, false otherwise (timeout)
      * @throws InterruptedException if interrupted
      */
-    public boolean waitUntilMinVersionIsGuaranteed(long minVersion, int position, long timeout) throws InterruptedException {
+    public boolean waitUntilMinVersionIsGuaranteed(VersionVC minVersionVC, int position, long timeout) throws InterruptedException {
+        long minVersion = minVersionVC.get(position);
         if(minVersion <= 0) {
             if(debug) {
                 log.debugf("Wait until min version but min version is less or equals than zero");

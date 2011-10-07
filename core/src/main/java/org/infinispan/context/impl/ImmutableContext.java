@@ -19,11 +19,6 @@
 
 package org.infinispan.context.impl;
 
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Map;
-import java.util.Set;
-
 import org.infinispan.CacheException;
 import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.context.Flag;
@@ -33,6 +28,11 @@ import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.util.BidirectionalMap;
 import org.infinispan.util.InfinispanCollections;
+
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * This context is a non-context for operations such as eviction which are not related
@@ -163,6 +163,11 @@ public final class ImmutableContext implements InvocationContext {
 
     @Override
     public VersionVC calculateVersionToRead() {
+        return null;
+    }
+
+    @Override
+    public VersionVC getPrepareVersion() {
         return null;
     }
 

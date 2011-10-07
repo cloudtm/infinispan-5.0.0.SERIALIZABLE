@@ -132,4 +132,5 @@ public interface ConsistentHash {
      * @return
      */
     ReplGroup getGroupFor(Object key, int replCount);
+
 }

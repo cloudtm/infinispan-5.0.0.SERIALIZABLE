@@ -51,9 +51,11 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
     @Override
     public Object visitGetKeyValueCommand(InvocationContext ctx, GetKeyValueCommand command) throws Throwable {
         if(ctx.isInTxScope()) {
-            int pos = getPositionInVC(command.getKey());
+            int pos = distributionManager.getSelfID();
             TxInvocationContext txctx = (TxInvocationContext) ctx;
-            long min = txctx.getVectorClockValueIn(pos);
+            Set<Integer> positions = new HashSet<Integer>(1);
+            positions.add(pos);
+            VersionVC min = txctx.getMinVersion(positions);
             if(isKeyLocal(command.getKey()) && !commitLog.waitUntilMinVersionIsGuaranteed(min, pos,
                     configuration.getSyncReplTimeout() * 3)) {
                 log.warnf("Try to read the key [%s] (local) but the min version is not guaranteed!",
@@ -211,7 +213,8 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
     protected void validateKey(Object key, VersionVC toCompare) {
         //it only needs to compare it own group id because it is guaranteed that this position is increase in
         // each version!
-        int pos = getPositionInVC(key);
+        //btw, it only compares local keys
+        int pos = distributionManager.getSelfID();
         if(!dataContainer.validateKey(key, pos, toCompare.get(pos))) {
             throw new ValidationException("Validation of key [" + key + "] failed!");
         }
@@ -321,10 +324,6 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
     @Override
     public void addTransaction(List<VersionVC> commitVC) {
         ((MultiVersionDataContainer) dataContainer).addNewCommittedTransaction(commitVC);
-    }
-
-    private int getPositionInVC(Object key) {
-        return dm.locateGroup(key).getId();
     }
 
     private boolean isKeyLocal(Object key) {

@@ -22,11 +22,11 @@
  */
 package org.infinispan.context;
 
-import java.util.Set;
-
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.transport.Address;
+
+import java.util.Set;
 
 /**
  * A context that contains information pertaining to a given invocation.  These contexts typically have the lifespan of
@@ -80,6 +80,8 @@ public interface InvocationContext extends EntryLookup, FlagContainer, Cloneable
     InternalMVCCEntry getReadKey(Object Key);
 
     VersionVC calculateVersionToRead();
+
+    VersionVC getPrepareVersion();
 
     void setVersionToRead(VersionVC version);
 }

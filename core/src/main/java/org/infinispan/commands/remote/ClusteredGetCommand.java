@@ -66,7 +66,7 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
 
     private DistributionManager distributionManager;
 
-    private long minVersion = 0; //with 0, it does not waits for anything and return a value compatible with maxVC
+    private VersionVC minVersion = null; //with null, it does not waits for anything and return a value compatible with maxVC
     private VersionVC maxVersion = null; //read the most recent version (in tx context, this is not null)
     private CommitLog commitLog;
 
@@ -116,8 +116,8 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
             invocationContext.setVersionToRead(maxVersion);
 
             long timeout = configuration.getSyncReplTimeout();
-            if(!commitLog.waitUntilMinVersionIsGuaranteed(minVersion, distributionManager.locateGroup(key).getId(),
-                    timeout)) {
+            int pos = distributionManager.getSelfID();
+            if(!commitLog.waitUntilMinVersionIsGuaranteed(minVersion, pos, timeout)) {
                 if(log.isInfoEnabled()) {
                     log.infof("Receive remote get request, but the value wanted is not available. key: %s," +
                             "min version: %s, max version: %s", key, minVersion, maxVersion);
@@ -176,7 +176,7 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
     public void setParameters(int commandId, Object[] args) {
         key = args[0];
         cacheName = (String) args[1];
-        minVersion = (Long) args[2];
+        minVersion = (VersionVC) args[2];
         maxVersion = (VersionVC) args[3];
         if (args.length>4) {
             this.flags = (Set<Flag>) args[4];
@@ -228,17 +228,10 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
         this.flags = flags;
     }
 
-    public long getMinVersion() {
-        return minVersion;
-    }
-
-    public void setMinVersion(long minVersion) {
+    public void setMinVersion(VersionVC minVersion) {
         this.minVersion = minVersion;
     }
 
-    public VersionVC getMaxVersion() {
-        return maxVersion;
-    }
 
     public void setMaxVersion(VersionVC maxVersion) {
         this.maxVersion = maxVersion;

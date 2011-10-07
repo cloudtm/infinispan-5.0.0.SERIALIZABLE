@@ -24,7 +24,6 @@ package org.infinispan.context.impl;
 
 import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.context.InvocationContext;
-import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.transaction.xa.GlobalTransaction;
 
@@ -88,6 +87,8 @@ public interface TxInvocationContext extends InvocationContext {
     void updateVectorClock(VersionVC other);
 
     long getVectorClockValueIn(int idx);
+
+    VersionVC getMinVersion(Set<Integer> toReadFrom);
 
     void setCommitVersion(VersionVC version);
 }

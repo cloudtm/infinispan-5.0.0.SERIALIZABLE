@@ -187,6 +187,11 @@ public class InvocationContextFlagsOverride implements InvocationContext {
     }
 
     @Override
+    public VersionVC getPrepareVersion() {
+        return delegate.getPrepareVersion();
+    }
+
+    @Override
     public void setVersionToRead(VersionVC version) {
         delegate.setVersionToRead(version);
     }

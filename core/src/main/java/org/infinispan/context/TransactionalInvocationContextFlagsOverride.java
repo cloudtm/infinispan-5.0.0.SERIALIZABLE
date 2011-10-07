@@ -23,17 +23,16 @@
 
 package org.infinispan.context;
 
-import java.util.Collection;
-import java.util.List;
-import java.util.Set;
-
-import javax.transaction.Transaction;
-
 import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.transaction.xa.GlobalTransaction;
+
+import javax.transaction.Transaction;
+import java.util.Collection;
+import java.util.List;
+import java.util.Set;
 
 /**
  * Extension of InvocationContextFlagsOverride to be used when a TxInvocationContext
@@ -115,6 +114,11 @@ public class TransactionalInvocationContextFlagsOverride extends InvocationConte
     @Override
     public long getVectorClockValueIn(int idx) {
         return delegate.getVectorClockValueIn(idx);
+    }
+
+    @Override
+    public VersionVC getMinVersion(Set<Integer> toReadFrom) {
+        return delegate.getMinVersion(toReadFrom);
     }
 
     @Override

@@ -125,6 +125,16 @@ public class VersionVC implements Externalizable, Serializable {
         return copy;
     }
 
+    public VersionVC copy(Set<Integer> pos) {
+        VersionVC copy = new VersionVC();
+        for(Integer p : pos) {
+            if(this.vectorClock.containsKey(p)) {
+                copy.vectorClock.put(p, this.vectorClock.get(p));
+            }
+        }
+        return copy;
+    }
+
     @Override
     public String toString() {
         return "Version{vc=" + vectorClock + "}";
