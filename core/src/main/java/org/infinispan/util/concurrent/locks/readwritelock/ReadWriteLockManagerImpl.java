@@ -51,6 +51,10 @@ public class ReadWriteLockManagerImpl implements ReadWriteLockManager {
     private AtomicLong remoteLocalContentions = new AtomicLong(0);
     private AtomicLong remoteRemoteContentions = new AtomicLong(0);
 
+
+    private AtomicLong registerReadTime = new AtomicLong(0);
+    private AtomicLong numRegisterRead  = new AtomicLong(0);
+
     protected void updateContentionStats(Object key, InvocationContext ctx){
         Object owner = getOwner(key);
 
@@ -313,6 +317,13 @@ public class ReadWriteLockManagerImpl implements ReadWriteLockManager {
         }
     }
 
+
+    public void addRegisterReadSample(long nanotime){
+
+        registerReadTime.addAndGet(nanotime);
+        numRegisterRead.incrementAndGet();
+    }
+
     /*
     * ======================= JMX == STATS =============================
     */
@@ -357,5 +368,18 @@ public class ReadWriteLockManagerImpl implements ReadWriteLockManager {
     @Metric(displayName = "RemoteRemoteContentions")
     public long getRemoteRemoteContentions(){
         return remoteRemoteContentions.get();
+    }
+
+
+    @ManagedAttribute(description = "The number of registerRead calls")
+    @Metric(displayName = "NumRegisterRead")
+    public long getNumRegisterRead(){
+        return numRegisterRead.get();
+    }
+
+    @ManagedAttribute(description = "The time for registring a read")
+    @Metric(displayName = "RegisterReadTime")
+    public long getRegisterReadTime(){
+        return registerReadTime.get();
     }
 }

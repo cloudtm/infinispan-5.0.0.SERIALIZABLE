@@ -26,6 +26,7 @@ import org.infinispan.container.DataContainer;
 import org.infinispan.container.entries.InternalCacheEntry;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -133,15 +134,15 @@ public class QueryableDataContainer implements DataContainer {
      */
 
     @Override
-    public InternalMVCCEntry get(Object k, VersionVC max) {
+    public InternalMVCCEntry get(Object k, VersionVC max, boolean firstTimeOnNode) {
         loggedOperations.add("get(" + k + ", " + max + ")");
-        return delegate.get(k,max);
+        return delegate.get(k, max, firstTimeOnNode);
     }
 
     @Override
-    public InternalMVCCEntry peek(Object k, VersionVC max) {
+    public InternalMVCCEntry peek(Object k, VersionVC max, boolean firstTimeOnNode) {
         loggedOperations.add("peek(" + k + ", " + max + ")");
-        return delegate.peek(k, max);
+        return delegate.peek(k, max, firstTimeOnNode);
     }
 
     @Override
@@ -151,9 +152,9 @@ public class QueryableDataContainer implements DataContainer {
     }
 
     @Override
-    public boolean containsKey(Object k, VersionVC max) {
+    public boolean containsKey(Object k, VersionVC max, boolean firstTimeOnNode) {
         loggedOperations.add("containsKey(" + k + ", " + max + ")" );
-        return delegate.containsKey(k,max);
+        return delegate.containsKey(k,max, firstTimeOnNode);
     }
 
     @Override
@@ -163,9 +164,9 @@ public class QueryableDataContainer implements DataContainer {
     }
 
     @Override
-    public int size(VersionVC max) {
+    public int size(VersionVC max, boolean firstTimeOnNode) {
         loggedOperations.add("size(" + max + ")" );
-        return delegate.size(max);
+        return delegate.size(max, firstTimeOnNode);
     }
 
     @Override
@@ -175,15 +176,15 @@ public class QueryableDataContainer implements DataContainer {
     }
 
     @Override
-    public Set<Object> keySet(VersionVC max) {
+    public Set<Object> keySet(VersionVC max, boolean firstTimeOnNode) {
         loggedOperations.add("keySet(" + max + ")" );
-        return delegate.keySet(max);
+        return delegate.keySet(max, firstTimeOnNode);
     }
 
     @Override
-    public Collection<Object> values(VersionVC max) {
+    public Collection<Object> values(VersionVC max, boolean firstTimeOnNode) {
         loggedOperations.add("values(" + max + ")" );
-        return delegate.values(max);
+        return delegate.values(max, firstTimeOnNode);
     }
 
     @Override
@@ -193,14 +194,14 @@ public class QueryableDataContainer implements DataContainer {
     }
 
     @Override
-    public void purgeExpired(VersionVC version) {
+    public void purgeExpired(VersionVC version, boolean firstTimeOnNode) {
         loggedOperations.add("purgeExpired(" + version + ")" );
-        delegate.purgeExpired(version);
+        delegate.purgeExpired(version, firstTimeOnNode);
     }
 
     @Override
-    public boolean validateKey(Object key, int idx, long value) {
-        loggedOperations.add("validateKey(" + key + "," + idx + "," + value + ")" );
-        return delegate.validateKey(key, idx, value);
+    public boolean validateKey(Object key, VersionVC version) {
+        loggedOperations.add("validateKey(" + key + "," + version + ")" );
+        return delegate.validateKey(key, version);
     }
 }

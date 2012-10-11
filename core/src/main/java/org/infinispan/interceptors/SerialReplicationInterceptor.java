@@ -2,8 +2,11 @@ package org.infinispan.interceptors;
 
 import org.infinispan.CacheException;
 import org.infinispan.commands.tx.PrepareCommand;
+import org.infinispan.commands.tx.TotalOrderPrepareCommand;
 import org.infinispan.context.impl.TxInvocationContext;
+import org.infinispan.factories.annotations.Inject;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.remoting.responses.ExceptionResponse;
 import org.infinispan.remoting.responses.Response;
 import org.infinispan.remoting.responses.SuccessfulResponse;
@@ -17,6 +20,13 @@ import java.util.Map;
  *         Date: 26-08-2011
  */
 public class SerialReplicationInterceptor extends ReplicationInterceptor {
+	
+	private VersionVCFactory versionVCFactory; 
+	
+	@Inject
+	public void inject(VersionVCFactory versionVCFactory){
+		this.versionVCFactory=versionVCFactory;
+	}
 
     @Override
     public Object visitPrepareCommand(TxInvocationContext ctx, PrepareCommand command) throws Throwable {
@@ -30,7 +40,7 @@ public class SerialReplicationInterceptor extends ReplicationInterceptor {
                     responses.toString());
 
             if (!responses.isEmpty()) {
-                VersionVC allPreparedVC = new VersionVC();
+                VersionVC allPreparedVC = this.versionVCFactory.createVersionVC();
 
                 //process all responses
                 for (Response r : responses.values()) {
@@ -55,5 +65,10 @@ public class SerialReplicationInterceptor extends ReplicationInterceptor {
             }
         }
         return retVal;
+    }
+
+    @Override
+    public Object visitTotalOrderPrepareCommand(TxInvocationContext ctx, TotalOrderPrepareCommand command) throws Throwable {
+        return visitPrepareCommand(ctx, command);
     }
 }

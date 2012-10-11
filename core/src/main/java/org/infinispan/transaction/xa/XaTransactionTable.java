@@ -24,6 +24,7 @@ package org.infinispan.transaction.xa;
 
 import org.infinispan.CacheException;
 import org.infinispan.factories.annotations.Inject;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.transaction.LocalTransaction;
 import org.infinispan.transaction.TransactionTable;
 import org.infinispan.transaction.xa.recovery.RecoveryManager;
@@ -48,10 +49,14 @@ public class XaTransactionTable extends TransactionTable {
 
     protected final ConcurrentMap<Xid, LocalXaTransaction> xid2LocalTx = new ConcurrentHashMap<Xid, LocalXaTransaction>();
     private RecoveryManager recoveryManager;
+    
+    //added by Sebastiano
+    private VersionVCFactory versionVCFactory;
 
     @Inject
-    public void init(RecoveryManager recoveryManager) {
+    public void init(RecoveryManager recoveryManager, VersionVCFactory versionVCFactory) {
         this.recoveryManager = recoveryManager;
+        this.versionVCFactory=versionVCFactory;
     }
 
     @Override
@@ -94,7 +99,7 @@ public class XaTransactionTable extends TransactionTable {
                 throw new CacheException(e);
             }
             //initiates the vector clock for serializability
-            localTransaction.initVectorClock(commitLog.getActualVersion());
+            localTransaction.initVectorClock(this.versionVCFactory, commitLog.getActualVersion());
         }
     }
 

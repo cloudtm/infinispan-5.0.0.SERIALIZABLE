@@ -3,12 +3,10 @@ package org.infinispan.interceptors;
 import org.infinispan.CacheException;
 import org.infinispan.commands.CommandsFactory;
 import org.infinispan.commands.read.GetKeyValueCommand;
-import org.infinispan.commands.tx.AcquireValidationLocksCommand;
-import org.infinispan.commands.tx.CommitCommand;
-import org.infinispan.commands.tx.PrepareCommand;
-import org.infinispan.commands.tx.RollbackCommand;
+import org.infinispan.commands.tx.*;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.context.InvocationContextContainer;
+import org.infinispan.context.impl.LocalTxInvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.jmx.annotations.MBean;
@@ -17,6 +15,7 @@ import org.infinispan.jmx.annotations.ManagedOperation;
 import org.infinispan.mvcc.CommitQueue;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.mvcc.exception.ValidationException;
 import org.infinispan.util.Util;
 import org.infinispan.util.concurrent.TimeoutException;
@@ -26,6 +25,7 @@ import org.rhq.helpers.pluginAnnotations.agent.MeasurementType;
 import org.rhq.helpers.pluginAnnotations.agent.Metric;
 import org.rhq.helpers.pluginAnnotations.agent.Operation;
 
+import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -38,6 +38,7 @@ public class SerialTxInterceptor extends TxInterceptor {
     private CommandsFactory commandsFactory;
     private CommitQueue commitQueue;
     private InvocationContextContainer icc;
+    private VersionVCFactory versionVCFactory;
 
     //this is only for remote commands only!!
     private final AtomicLong successPrepareTime = new AtomicLong(0);
@@ -49,16 +50,17 @@ public class SerialTxInterceptor extends TxInterceptor {
     private final AtomicLong rollbacksDueToDeadLock = new AtomicLong(0);
     private final AtomicLong rollbacksDueToValidation = new AtomicLong(0);
     //read operation
-    private final AtomicLong localReadTime = new AtomicLong(0);
+    private final AtomicLong readTime = new AtomicLong(0);
     private final AtomicLong remoteReadTime = new AtomicLong(0);
-    private final AtomicLong nrLocalReadOp = new AtomicLong(0);
+    private final AtomicLong nrReadOp = new AtomicLong(0);
     private final AtomicLong nrRemoteReadOp = new AtomicLong(0);
 
     @Inject
-    public void inject(CommandsFactory commandsFactory, CommitQueue commitQueue, InvocationContextContainer icc) {
+    public void inject(CommandsFactory commandsFactory, CommitQueue commitQueue, InvocationContextContainer icc, VersionVCFactory versionVCFactory) {
         this.commandsFactory = commandsFactory;
         this.commitQueue = commitQueue;
         this.icc = icc;
+        this.versionVCFactory=versionVCFactory;
     }
 
     @Override
@@ -67,7 +69,15 @@ public class SerialTxInterceptor extends TxInterceptor {
         boolean successful = true;
         try {
             Set<Object> writeSet = command.getAffectedKeys();
-            Set<Object> readSet = command.getReadSet();
+            Set<Object> readSet = new HashSet<Object>();
+            Object[] arrayReadSet = command.getReadSet();
+            if(arrayReadSet!= null){
+            	for(Object o: arrayReadSet){
+            		readSet.add(o);
+            	}
+            }
+            
+            
 
             if(writeSet != null && writeSet.isEmpty()) {
                 log.debugf("new transaction [%s] arrived to SerialTxInterceptor. it is a Read-Only Transaction. returning",
@@ -91,8 +101,8 @@ public class SerialTxInterceptor extends TxInterceptor {
             //finally, process the rest of the command
             Object retVal = super.visitPrepareCommand(ctx, command);
 
-            VersionVC commitVC = commitQueue.addTransaction(command.getGlobalTransaction(), ctx.calculateVersionToRead(),
-                    icc.getInvocationContext().clone(), 0);
+            VersionVC commitVC = commitQueue.addTransaction(command.getGlobalTransaction(), ctx.calculateVersionToRead(this.versionVCFactory),
+                    icc.getInvocationContext().clone());
 
             if(retVal != null && retVal instanceof VersionVC) {
                 VersionVC othersCommitVC = (VersionVC) retVal;
@@ -162,7 +172,7 @@ public class SerialTxInterceptor extends TxInterceptor {
             if(ctx.isInTxScope()) {
                 ((TxInvocationContext) ctx).markReadFrom(0);
                 //update vc
-                InternalMVCCEntry ime = ctx.getReadKey(command.getKey());
+                InternalMVCCEntry ime = ctx.getLocalReadKey(command.getKey());
                 if(ime == null) {
                     log.warn("InternalMVCCEntry is null.");
                 } else if(((TxInvocationContext) ctx).hasModifications() && !ime.isMostRecent()) {
@@ -171,8 +181,9 @@ public class SerialTxInterceptor extends TxInterceptor {
                     throw new CacheException("transaction must abort!! read an old value and it is not a read only transaction");
                 } else {
                     VersionVC v = ime.getVersion();
-                    if(v.get(0) == VersionVC.EMPTY_POSITION) {
-                        v.set(0,0);
+                    if(this.versionVCFactory.translateAndGet(v,0) == VersionVC.EMPTY_POSITION) {
+                    	this.versionVCFactory.translateAndSet(v,0,0);
+                        
                     }
                     ((TxInvocationContext) ctx).updateVectorClock(v);
                 }
@@ -183,13 +194,26 @@ public class SerialTxInterceptor extends TxInterceptor {
             if(statisticsEnabled) {
                 long end = System.nanoTime();
                 if(ctx.isOriginLocal()) {
-                    localReadTime.addAndGet(end - start);
-                    nrLocalReadOp.incrementAndGet();
+                    readTime.addAndGet(end - start);
+                    nrReadOp.incrementAndGet();
                 } else {
                     remoteReadTime.addAndGet(end - start);
                     nrRemoteReadOp.incrementAndGet();
                 }
             }
+        }
+    }
+
+    @Override
+    public Object visitTotalOrderPrepareCommand(TxInvocationContext ctx, TotalOrderPrepareCommand command) throws Throwable {
+        if(ctx.isOriginLocal()) {
+            Object retVal = invokeNextInterceptor(ctx, command);
+            if(retVal != null && retVal instanceof VersionVC) {
+                ctx.setCommitVersion((VersionVC) retVal);
+            }
+            return retVal;
+        } else {
+            return visitPrepareCommand(ctx, command);
         }
     }
 
@@ -204,9 +228,9 @@ public class SerialTxInterceptor extends TxInterceptor {
         rollbacksDueToUnableAcquireLock.set(0);
         rollbacksDueToDeadLock.set(0);
         rollbacksDueToValidation.set(0);
-        localReadTime.set(0);
+        readTime.set(0);
         remoteReadTime.set(0);
-        nrLocalReadOp.set(0);
+        nrReadOp.set(0);
         nrRemoteReadOp.set(0);
     }
 
@@ -252,10 +276,10 @@ public class SerialTxInterceptor extends TxInterceptor {
         return rollbacksDueToValidation.get();
     }
 
-    @ManagedAttribute(description = "Duration of all local read command since last reset (nano-seconds)")
-    @Metric(displayName = "LocalReadTime", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
-    public long getLocalReadTime() {
-        return localReadTime.get();
+    @ManagedAttribute(description = "Duration of all read command since last reset (nano-seconds)")
+    @Metric(displayName = "ReadTime", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getReadTime() {
+        return readTime.get();
     }
 
     @ManagedAttribute(description = "Duration of all remote read command since last reset (nano-seconds)")
@@ -264,10 +288,10 @@ public class SerialTxInterceptor extends TxInterceptor {
         return remoteReadTime.get();
     }
 
-    @ManagedAttribute(description = "Number of local read commands since last reset")
-    @Metric(displayName = "NrLocalReadOp", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
-    public long getNrLocalReadOp() {
-        return nrLocalReadOp.get();
+    @ManagedAttribute(description = "Number of read commands since last reset")
+    @Metric(displayName = "NrReadOp", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getNrReadOp() {
+        return nrReadOp.get();
     }
 
     @ManagedAttribute(description = "Number of remote read commands since last reset")

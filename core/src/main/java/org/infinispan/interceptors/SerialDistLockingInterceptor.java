@@ -4,6 +4,7 @@ import org.infinispan.commands.read.GetKeyValueCommand;
 import org.infinispan.commands.tx.AcquireValidationLocksCommand;
 import org.infinispan.commands.tx.CommitCommand;
 import org.infinispan.commands.tx.RollbackCommand;
+import org.infinispan.commands.tx.TotalOrderPrepareCommand;
 import org.infinispan.container.MultiVersionDataContainer;
 import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.container.entries.SerializableEntry;
@@ -16,6 +17,7 @@ import org.infinispan.marshall.MarshalledValue;
 import org.infinispan.mvcc.CommitLog;
 import org.infinispan.mvcc.CommitQueue;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.mvcc.exception.ValidationException;
 import org.infinispan.util.ReversibleOrderedSet;
 import org.infinispan.util.Util;
@@ -31,15 +33,17 @@ import java.util.*;
 public class SerialDistLockingInterceptor extends DistLockingInterceptor implements CommitQueue.CommitInstance {
     private CommitQueue commitQueue;
     private DistributionManager distributionManager;
+    private VersionVCFactory versionVCFactory;
 
     private boolean debug, info;
     private CommitLog commitLog;
 
     @Inject
-    public void inject(CommitQueue commitQueue, DistributionManager distributionManager, CommitLog commitLog) {
+    public void inject(CommitQueue commitQueue, DistributionManager distributionManager, CommitLog commitLog, VersionVCFactory versionVCFactory) {
         this.commitQueue = commitQueue;
         this.distributionManager = distributionManager;
         this.commitLog = commitLog;
+        this.versionVCFactory = versionVCFactory;
     }
 
     @Start
@@ -48,6 +52,7 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
         info = log.isInfoEnabled();
     }
 
+    /*We can delete the following check. See AbstractCacheTransaction.initVectorClock(...)
     @Override
     public Object visitGetKeyValueCommand(InvocationContext ctx, GetKeyValueCommand command) throws Throwable {
         if(ctx.isInTxScope()) {
@@ -55,17 +60,22 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
             TxInvocationContext txctx = (TxInvocationContext) ctx;
             Set<Integer> positions = new HashSet<Integer>(1);
             positions.add(pos);
-            VersionVC min = txctx.getMinVersion(positions);
+            VersionVC min = txctx.getMinVersion(this.versionVCFactory, positions);
+            
+            
             if(isKeyLocal(command.getKey()) && !commitLog.waitUntilMinVersionIsGuaranteed(min, pos,
                     configuration.getSyncReplTimeout() * 3)) {
                 log.warnf("Try to read the key [%s] (local) but the min version is not guaranteed!",
                         command.getKey());
                 throw new TimeoutException("Cannot read the key " + command.getKey());
             }
+            
         }
 
         return super.visitGetKeyValueCommand(ctx, command);    //To change body of overridden methods use File | Settings | File Templates.
     }
+    
+    */
 
     @Override
     public Object visitCommitCommand(TxInvocationContext ctx, CommitCommand command) throws Throwable {
@@ -79,7 +89,22 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
         } finally {
             if (ctx.isInTxScope()) {
                 if(getOnlyLocalKeys(ctx.getAffectedKeys()).isEmpty()) {
-                    ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx);
+
+                    if(command.getCommitVersion() != null){
+
+                        //The CommitCommand has a valid commit snapshot id. This means that the committing transaction is not a read-only
+                        //in the cluster.
+
+                        //However getOnlyLocalKeys(ctx.getAffectedKeys()).isEmpty() meaning that the commit transaction has only read on the current node.
+
+                        //This is beceause this transaction must be serialized before subsequent conflicting transactions on this node
+                        commitQueue.updateOnlyPrepareVC(command.getCommitVersion());
+
+
+                        ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx);
+                    }
+
+
                 } else {
                     try {
                         commitQueue.updateAndWait(command.getGlobalTransaction(), command.getCommitVersion());
@@ -92,7 +117,7 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
                                     e.getClass().getName(), e.getMessage());
                         }
                         e.printStackTrace();
-                        commitQueue.remove(command.getGlobalTransaction());
+                        commitQueue.remove(command.getGlobalTransaction(), true);
                     }
                 }
             } else {
@@ -104,13 +129,18 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
 
     @Override
     public Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable {
+
+        String stringTx = Util.prettyPrintGlobalTransaction(command.getGlobalTransaction());
+
         if(trace) {
             log.tracef("Rollback Command received for transaction %s (%s)",
-                    Util.prettyPrintGlobalTransaction(command.getGlobalTransaction()),
+                    stringTx,
                     (ctx.isOriginLocal() ? "local" : "remote"));
         }
         try {
-            commitQueue.remove(command.getGlobalTransaction());
+
+            commitQueue.remove(command.getGlobalTransaction(), false);
+
             return invokeNextInterceptor(ctx, command);
         } finally {
             if (ctx.isInTxScope()) {
@@ -210,12 +240,14 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
         }
     }
 
+    @Override
+    public Object visitTotalOrderPrepareCommand(TxInvocationContext ctx, TotalOrderPrepareCommand command) throws Throwable {
+        return visitPrepareCommand(ctx, command);
+    }
+
     protected void validateKey(Object key, VersionVC toCompare) {
-        //it only needs to compare it own group id because it is guaranteed that this position is increase in
-        // each version!
-        //btw, it only compares local keys
-        int pos = distributionManager.getSelfID();
-        if(!dataContainer.validateKey(key, pos, toCompare.get(pos))) {
+        
+        if(!dataContainer.validateKey(key, toCompare)) {
             throw new ValidationException("Validation of key [" + key + "] failed!");
         }
     }
@@ -320,12 +352,12 @@ public class SerialDistLockingInterceptor extends DistLockingInterceptor impleme
     public void addTransaction(VersionVC commitVC) {
         ((MultiVersionDataContainer) dataContainer).addNewCommittedTransaction(commitVC);
     }
-
+/*
     @Override
     public void addTransaction(List<VersionVC> commitVC) {
         ((MultiVersionDataContainer) dataContainer).addNewCommittedTransaction(commitVC);
     }
-
+*/
     private boolean isKeyLocal(Object key) {
         return distributionManager.getLocality(key).isLocal();
     }

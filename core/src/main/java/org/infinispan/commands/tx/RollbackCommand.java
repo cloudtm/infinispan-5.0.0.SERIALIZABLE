@@ -28,6 +28,9 @@ import org.infinispan.context.impl.RemoteTxInvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.transaction.xa.GlobalTransaction;
 import org.infinispan.transaction.RemoteTransaction;
+import org.infinispan.util.Util;
+import org.infinispan.util.logging.Log;
+import org.infinispan.util.logging.LogFactory;
 
 /**
  * Command corresponding to a transaction rollback.
@@ -37,6 +40,8 @@ import org.infinispan.transaction.RemoteTransaction;
  */
 public class RollbackCommand extends AbstractTransactionBoundaryCommand {
     public static final byte COMMAND_ID = 13;
+
+    private static final Log log = LogFactory.getLog(RollbackCommand.class);
 
     private boolean neededToBeSend = true;
 
@@ -78,7 +83,71 @@ public class RollbackCommand extends AbstractTransactionBoundaryCommand {
         if(configuration.isTotalOrderReplication()) {
             return totalOrderPerform(ctx);
         } else {
-            return super.perform(ctx);
+
+
+            if (ctx != null) throw new IllegalStateException("Expected null context!");
+            this.globalTx.setRemote(true);
+
+            RemoteTransaction transaction = txTable.getRemoteTransaction(globalTx);
+
+            boolean garbageCollectOutOfOrderRollback = false;
+
+            if (transaction == null) { //This transaction is not prepared here
+
+              txTable.setOutOfOrderRollback(globalTx);
+              log.warnf("Registered out of order Rollback for transaction %s", Util.prettyPrintGlobalTransaction(globalTx));
+
+
+              //Now I've marked that rollback is arrived before the prepare.
+
+
+
+              //Is the prepare arrived now?
+              transaction = txTable.getRemoteTransaction(globalTx);
+
+              if(transaction != null){//Yes
+
+                 garbageCollectOutOfOrderRollback = true;
+
+
+              }
+
+
+            }
+
+            if(transaction == null){
+
+               log.warnf("Prepare not arrived for transaction %s", Util.prettyPrintGlobalTransaction(globalTx));
+               //This means that:
+               // - the prepare is not arrived yet or
+               // - the prepare has seen the "out of order rollback" mark and it has not been performed.
+
+               //In both cases return null. We don't need to rollback a not prepared transaction.
+
+              return invalidRemoteTxReturnValue();
+            }
+
+            //Transaction is not null. The prepare has been performed or it is still running.
+
+            if(garbageCollectOutOfOrderRollback){//We can garbage collects out of order information.
+
+                log.warnf("Registered out of order Rollback is going to be removed for transaction %s", Util.prettyPrintGlobalTransaction(globalTx));
+
+                txTable.removeOutOfOrderRollback(globalTx);
+            }
+
+            //If the prepare is running I should wait for its completion.
+
+            transaction.waitForPrepare();
+
+            visitRemoteTransaction(transaction);
+            RemoteTxInvocationContext ctxt = icc.createRemoteTxInvocationContext(getOrigin());
+            ctxt.setRemoteTransaction(transaction);
+
+
+            return invoker.invoke(ctxt, this);
+
+
         }
     }
 

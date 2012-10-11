@@ -30,6 +30,7 @@ import org.infinispan.commands.module.ModuleCommandFactory;
 import org.infinispan.commands.read.DistributedExecuteCommand;
 import org.infinispan.commands.read.GetKeyValueCommand;
 import org.infinispan.commands.read.MapReduceCommand;
+import org.infinispan.commands.read.serializable.SerialGetKeyValueCommand;
 import org.infinispan.commands.remote.ClusteredGetCommand;
 import org.infinispan.commands.remote.MultipleRpcCommand;
 import org.infinispan.commands.remote.SingleRpcCommand;
@@ -47,6 +48,7 @@ import org.infinispan.factories.scopes.Scope;
 import org.infinispan.factories.scopes.Scopes;
 import org.infinispan.manager.EmbeddedCacheManager;
 import org.infinispan.remoting.transport.Transport;
+import org.infinispan.util.concurrent.IsolationLevel;
 
 import java.util.Map;
 
@@ -109,7 +111,12 @@ public class RemoteCommandsFactory {
                 command = new ReplaceCommand();
                 break;
             case GetKeyValueCommand.COMMAND_ID:
-                command = new GetKeyValueCommand();
+            	if(cacheManager.getDefaultConfiguration().getIsolationLevel() == IsolationLevel.SERIALIZABLE){
+            		command = new SerialGetKeyValueCommand();
+            	}
+            	else{
+            		command = new GetKeyValueCommand();
+            	}
                 break;
             case ClearCommand.COMMAND_ID:
                 command = new ClearCommand();

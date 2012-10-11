@@ -26,6 +26,7 @@ package org.infinispan.context;
 import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.util.BidirectionalMap;
 
@@ -172,18 +173,38 @@ public class InvocationContextFlagsOverride implements InvocationContext {
     }
 
     @Override
-    public void addReadKey(Object key, InternalMVCCEntry ime) {
-        delegate.addReadKey(key, ime);
+    public void addLocalReadKey(Object key, InternalMVCCEntry ime) {
+        delegate.addLocalReadKey(key, ime);
+    }
+    
+    @Override
+    public void removeLocalReadKey(Object key) {
+        delegate.removeLocalReadKey(key);
+    }
+    
+    @Override
+    public void removeRemoteReadKey(Object key) {
+        delegate.removeRemoteReadKey(key);
+    }
+    
+    @Override
+    public void addRemoteReadKey(Object key, InternalMVCCEntry ime) {
+        delegate.addRemoteReadKey(key, ime);
     }
 
     @Override
-    public InternalMVCCEntry getReadKey(Object Key) {
-        return delegate.getReadKey(Key);
+    public InternalMVCCEntry getLocalReadKey(Object Key) {
+        return delegate.getLocalReadKey(Key);
+    }
+    
+    @Override
+    public InternalMVCCEntry getRemoteReadKey(Object Key) {
+        return delegate.getRemoteReadKey(Key);
     }
 
     @Override
-    public VersionVC calculateVersionToRead() {
-        return delegate.calculateVersionToRead();
+    public VersionVC calculateVersionToRead(VersionVCFactory versionVCFactory) {
+        return delegate.calculateVersionToRead(versionVCFactory);
     }
 
     @Override
@@ -200,7 +221,32 @@ public class InvocationContextFlagsOverride implements InvocationContext {
    public Address getOrigin() {
       return delegate.getOrigin();
    }
+    
+    @Override
+    public void setAlreadyReadOnNode(boolean alreadyRead){
+    	delegate.setAlreadyReadOnNode(alreadyRead);
+    }
    
+    @Override
+    public boolean getAlreadyReadOnNode(){
+    	return delegate.getAlreadyReadOnNode();
+    }
+    
+    @Override
+    public void setLastReadKey(CacheEntry entry){
+    	delegate.setLastReadKey(entry);
+    }
+    
+    @Override
+    public CacheEntry getLastReadKey(){
+    	return delegate.getLastReadKey();
+    }
+    
+    @Override
+    public void clearLastReadKey(){
+    	delegate.clearLastReadKey();
+    }
+    
    @Override
    public InvocationContextFlagsOverride clone() {
       return new InvocationContextFlagsOverride(delegate, flags);

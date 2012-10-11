@@ -50,6 +50,7 @@ import java.util.Map;
 public class ReplicationInterceptor extends BaseRpcInterceptor {
 
     protected TotalOrderTransactionManager totman;
+    
 
     @Inject
     public void inject(TotalOrderTransactionManager totman) {

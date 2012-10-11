@@ -276,4 +276,17 @@ public class LockManagerImpl implements LockManager {
     public long getRemoteRemoteContentions(){
         return remoteRemoteContentions.get();
     }
+
+
+    @ManagedAttribute(description = "The number of registerRead calls")
+    @Metric(displayName = "NumRegisterRead")
+    public long getNumRegisterRead(){
+        return 0L;
+    }
+
+    @ManagedAttribute(description = "The time for registring a read")
+    @Metric(displayName = "RegisterReadTime")
+    public long getRegisterReadTime(){
+        return 0L;
+    }
 }

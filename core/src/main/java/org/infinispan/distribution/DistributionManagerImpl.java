@@ -49,6 +49,7 @@ import org.infinispan.loaders.CacheStore;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.ReplGroup;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.notifications.Listener;
 import org.infinispan.notifications.cachelistener.CacheNotifier;
 import org.infinispan.notifications.cachemanagerlistener.CacheManagerNotifier;
@@ -69,6 +70,7 @@ import org.infinispan.util.concurrent.IsolationLevel;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
 import org.rhq.helpers.pluginAnnotations.agent.*;
+import org.infinispan.container.key.ContextAwareKey;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -102,6 +104,7 @@ public class DistributionManagerImpl implements DistributionManager {
     private InvocationContextContainer icc;
     private InboundInvocationHandler inboundInvocationHandler;
     private CacheNotifier cacheNotifier;
+    private VersionVCFactory versionVCFactory;
 
     private final ViewChangeListener listener;
     private final ExecutorService rehashExecutor;
@@ -158,7 +161,7 @@ public class DistributionManagerImpl implements DistributionManager {
     public void init(Configuration configuration, RpcManager rpcManager, CacheManagerNotifier notifier, CommandsFactory cf,
                      DataContainer dataContainer, InterceptorChain interceptorChain, InvocationContextContainer icc,
                      CacheLoaderManager cacheLoaderManager, InboundInvocationHandler inboundInvocationHandler,
-                     CacheNotifier cacheNotifier) {
+                     CacheNotifier cacheNotifier, VersionVCFactory versionVCFactory) {
         this.cacheLoaderManager = cacheLoaderManager;
         this.configuration = configuration;
         this.rpcManager = rpcManager;
@@ -170,6 +173,7 @@ public class DistributionManagerImpl implements DistributionManager {
         this.icc = icc;
         this.inboundInvocationHandler = inboundInvocationHandler;
         this.cacheNotifier = cacheNotifier;
+        this.versionVCFactory = versionVCFactory;
     }
 
     // needs to be AFTER the RpcManager
@@ -293,18 +297,21 @@ public class DistributionManagerImpl implements DistributionManager {
         VersionVC maxToRead;
         VersionVC minVersion;
 
+        Set<Integer> toReadFrom=new HashSet<Integer>();
+        
         if(ctx.isInTxScope()) {
-            Set<Integer> toReadFrom = new HashSet<Integer>();
+            
 
             for(Address addr : destinations) {
                 toReadFrom.add(getAddressID(addr));
             }
 
-            maxToRead = ctx.calculateVersionToRead();
-            minVersion = ((LocalTxInvocationContext)ctx).getMinVersion(toReadFrom);
+            maxToRead = ctx.calculateVersionToRead(this.versionVCFactory);
+            minVersion = ((LocalTxInvocationContext)ctx).getMinVersion();
 
             get.setMaxVersion(maxToRead);
             get.setMinVersion(minVersion);
+            get.setAlreadyReadMask(((LocalTxInvocationContext)ctx).getReadFrom());
 
             if(log.isDebugEnabled()) {
                 log.debugf("Perform a remote get for transaction %s. Key: %s, min version: %s, max version: %s",
@@ -317,7 +324,8 @@ public class DistributionManagerImpl implements DistributionManager {
             }
         }
 
-        ResponseFilter filter = new ClusteredGetResponseValidityFilter(destinations);
+        ResponseFilter filter = new ClusteredGetResponseValidityFilter(destinations,
+                configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE);
 
         long start = System.nanoTime();
 
@@ -346,12 +354,32 @@ public class DistributionManagerImpl implements DistributionManager {
         if (!responses.isEmpty()) {
             for (Map.Entry<Address,Response> entry : responses.entrySet()) {
                 Response r = entry.getValue();
+                if (r == null) {
+                    continue;
+                }
                 if (r instanceof SuccessfulResponse) {
                     if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
                         if(ctx.isInTxScope()) {
                             InternalMVCCEntry ime = (InternalMVCCEntry) ((SuccessfulResponse) r).getResponseValue();
-                            ctx.addReadKey(key, ime);
-                            ((LocalTxInvocationContext) ctx).markReadFrom(getAddressID(entry.getKey()));
+                            int pos = getAddressID(entry.getKey());
+                            
+                            
+                            ctx.addRemoteReadKey(key, ime);
+                            ctx.removeLocalReadKey(key);
+                            	
+                            
+                            ((LocalTxInvocationContext) ctx).markReadFrom(versionVCFactory.translate(pos)); //To remember that this transaction has effectively read on this node
+
+                            
+                            
+                            VersionVC v = ime.getVersion();
+                            
+                            if(this.versionVCFactory.translateAndGet(v,pos) == VersionVC.EMPTY_POSITION) {
+	                            this.versionVCFactory.translateAndSet(v,pos,0);
+	                        }
+                            
+                            
+                            
                             if(log.isDebugEnabled()) {
                                 log.debugf("Remote Get successful for transaction %s and key %s. Return value is %s",
                                         Util.prettyPrintGlobalTransaction(((LocalTxInvocationContext) ctx).
@@ -530,6 +558,48 @@ public class DistributionManagerImpl implements DistributionManager {
     public ReplGroup locateGroup(Object key) {
         return getConsistentHash().getGroupFor(key, getReplCount());
     }
+    @Override
+    public Set<Integer> locateGroupIds(){
+    	
+    	Integer myId = getConsistentHash().getHashId(self);
+    	
+    	Set<Address> allCaches = getConsistentHash().getCaches();
+    	
+    	Set<Integer> result = getBackupsIdsForNode(self, getReplCount());
+    	
+    	Set<Integer> backupIds;
+    	
+    	
+    	
+    	for(Address a: allCaches){
+    		
+    		backupIds = getBackupsIdsForNode(a, getReplCount());
+    		if(backupIds.contains(myId)){
+    			result.add(getConsistentHash().getHashId(a));
+    		}
+    		
+    	}
+    	
+    	
+    	return result;
+    	
+    	
+    	
+    	
+    }
+    
+    private Set<Integer> getBackupsIdsForNode(Address node, int replCount){
+    	Set<Integer> result = new HashSet<Integer>();
+    	List<Address> backups = getConsistentHash().getBackupsForNode(node, replCount);
+    	for(Address a: backups){
+    		
+    		result.add(getConsistentHash().getHashId(a));
+    	}
+    	
+    	return result;
+    }
+    
+    
 
     @Override
     public int getAddressID(Address addr) {
@@ -606,7 +676,33 @@ public class DistributionManagerImpl implements DistributionManager {
         for (List<Address> addresses : locateAll(affectedKeys).values()) an.addAll(addresses);
         return new ArrayList<Address>(an);
     }
+    
+    public List<Address> getAffectedNodesAndOwners(Collection<Object> affectedKeysForNodes, Collection<Object> affectedKeysForOwners) {
+    	
+    	if ((affectedKeysForNodes == null || affectedKeysForNodes.isEmpty()) && (affectedKeysForOwners == null || affectedKeysForOwners.isEmpty())) {
+    		if (trace) log.trace("affected keys are empty");
+    		return Collections.emptyList();
+    	}
 
+    	Set<Address> an = new HashSet<Address>();
+
+    	if(affectedKeysForNodes != null && !affectedKeysForNodes.isEmpty()){
+    		for (List<Address> addresses : locateAll(affectedKeysForNodes).values()){
+    			an.addAll(addresses);
+    		}
+    	}		
+
+    	if(affectedKeysForOwners != null && !affectedKeysForOwners.isEmpty()){
+    		for (List<Address> addresses : locateAll(affectedKeysForOwners).values()){
+    			an.add(addresses.get(0));
+    		}
+    	}
+
+
+    	return new ArrayList<Address>(an);
+    }
+    
+    
     public void applyRemoteTxLog(List<WriteCommand> commands) {
         for (WriteCommand cmd : commands) {
             try {

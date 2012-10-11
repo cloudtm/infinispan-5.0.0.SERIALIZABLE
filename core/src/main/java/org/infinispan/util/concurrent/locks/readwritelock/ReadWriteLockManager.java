@@ -37,4 +37,6 @@ public interface ReadWriteLockManager extends LockManager {
     long getLockAcquisitionTimeout(InvocationContext ctx);
 
     void unlockAfterCommit(InvocationContext ctx);
+
+    public void addRegisterReadSample(long nanotime);
 }

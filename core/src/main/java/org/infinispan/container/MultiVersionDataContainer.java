@@ -2,13 +2,14 @@ package org.infinispan.container;
 
 import org.infinispan.container.entries.InternalCacheEntry;
 import org.infinispan.container.entries.InternalEntryFactory;
+import org.infinispan.distribution.DistributionManager;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.factories.annotations.Start;
 import org.infinispan.factories.annotations.Stop;
 import org.infinispan.mvcc.CommitLog;
 import org.infinispan.mvcc.InternalMVCCEntry;
-import org.infinispan.mvcc.VBox;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.util.Immutables;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
@@ -19,13 +20,16 @@ import java.util.concurrent.ConcurrentMap;
 
 /**
  * @author pedro
- *         Date: 01-08-2011
+ * @author <a href="mailto:peluso@gsd.inesc-id.pt">Sebastiano Peluso</a>
+ * @since 5.0
  */
 public class MultiVersionDataContainer implements DataContainer {
     /*
      * This class is not finished yet! it has some bugs and I don't know how to expire the key
      * Beside that, a garbage collector is needed to remove old versions
      * ... and some other things that I don't remember
+     *
+     * note: this class has big performance issue. it is recomended to redo it in a better way
      */
 
     private static final Log log = LogFactory.getLog(MultiVersionDataContainer.class);
@@ -33,12 +37,24 @@ public class MultiVersionDataContainer implements DataContainer {
     private CommitLog commitLog;
     private final InternalEntryFactory entryFactory;
     private final ConcurrentMap<Object, VBox> entries;
+    
+    
+    private VersionVCFactory vf;
 
     private boolean trace, debug;
 
     public MultiVersionDataContainer(int concurrencyLevel) {
+
+        log.info("GMU algorithm");
+
         entryFactory = new InternalEntryFactory();
         entries = new ConcurrentHashMap<Object, VBox>(128, 0.75f, concurrencyLevel);
+    }
+    
+    @Inject
+    public void inject(VersionVCFactory vf){
+    	
+    	this.vf=vf;
     }
 
     @Start
@@ -61,22 +77,22 @@ public class MultiVersionDataContainer implements DataContainer {
         return new InternalMVCCEntry(vbox.getValue(touch), visible, mostRecent);
     }
 
-    private VBox getFromMap(Object k, VersionVC max) {
+    private VBox getFromMap(Object k, long max) {
         VBox vbox = entries.get(k);
+        
+        if(max < 0){
+        	return vbox;
+        }
+        
         while(vbox != null) {
-            if(vbox.getVersion().isBefore(max)) {
+            if(vbox.version <= max) {
                 break;
             } else {
-                vbox = vbox.getPrevious();
+                vbox = vbox.previous;
             }
         }
         return vbox;
     }
-
-    //debug
-    /*private static void printVBox(VBox vbox) {
-        log.debugf("printing vbox chain: %s", vbox != null ? vbox.getVBoxChain() : "null");
-    }*/
 
     @Inject
     public void inject(CommitLog commitLog) {
@@ -85,12 +101,12 @@ public class MultiVersionDataContainer implements DataContainer {
 
     @Override
     public InternalCacheEntry get(Object k) {
-        return get(k, null).getValue();
+        return get(k, null, true).getValue();
     }
 
     @Override
     public InternalCacheEntry peek(Object k) {
-        return peek(k, null).getValue();
+        return peek(k, null, true).getValue();
     }
 
     @Override
@@ -100,7 +116,7 @@ public class MultiVersionDataContainer implements DataContainer {
 
     @Override
     public boolean containsKey(Object k) {
-        InternalCacheEntry ice = peek(k, null).getValue();
+        InternalCacheEntry ice = peek(k, null, true).getValue();
         return ice != null;
     }
 
@@ -111,7 +127,7 @@ public class MultiVersionDataContainer implements DataContainer {
 
     @Override
     public int size() {
-        return size(null);
+        return size(null, true);
     }
 
     @Override
@@ -126,7 +142,7 @@ public class MultiVersionDataContainer implements DataContainer {
 
     @Override
     public Collection<Object> values() {
-        return values(commitLog.getActualVersion());
+        return values(null, true);
     }
 
     @Override
@@ -136,28 +152,53 @@ public class MultiVersionDataContainer implements DataContainer {
 
     @Override
     public void purgeExpired() {
-        purgeExpired(commitLog.getActualVersion());
+        purgeExpired(null, true);
     }
 
     @Override
-    public InternalMVCCEntry get(Object k, VersionVC max) {
-        VersionVC visible = commitLog.getMostRecentLessOrEqualThan(max);
-        VBox vbox = getFromMap(k,visible);
-        InternalMVCCEntry ime = wrap(vbox, visible, vbox == entries.get(k), true, false);
-        if(ime.getValue() == null) {
-            entries.remove(k);
-        }
-        if(debug) {
-            log.debugf("get key [%s] with max vector clock of %s. returned value is %s",
-                    k, max, (ime.getValue() !=  null ? ime.getValue().getValue() : "null"));
-        }
-        return ime;
+    public InternalMVCCEntry get(Object k, VersionVC max, boolean firstTimeOnNode) {
+    	VersionVC visible;
+    	if(firstTimeOnNode){
+    		visible = commitLog.getMostRecentLessOrEqualThan(max);
+    	}
+    	else{
+    		
+			visible = max;
+			
+    	}
+    	
+    	
+    	
+     //   synchronized (entries) {
+            VBox vbox = getFromMap(k,visible.get(this.vf.getMyIndex()));
+            InternalMVCCEntry ime = wrap(vbox, visible, vbox == entries.get(k), true, false);
+            /*
+            if(ime.getValue() == null) {
+                entries.remove(k);
+            }
+            */
+            if(debug) {
+                log.debugf("get key [%s] with max vector clock of %s. returned value is %s",
+                        k, max, (ime.getValue() !=  null ? ime.getValue().getValue() : "null"));
+            }
+            return ime;
+       // }
     }
 
     @Override
-    public InternalMVCCEntry peek(Object k, VersionVC max) {
-        VersionVC visible = commitLog.getMostRecentLessOrEqualThan(max);
-        VBox vbox = getFromMap(k,visible);
+    public InternalMVCCEntry peek(Object k, VersionVC max, boolean firstTimeOnNode) {
+    	
+    	VersionVC visible;
+    	if(firstTimeOnNode){
+    		visible = commitLog.getMostRecentLessOrEqualThan(max);
+    	}
+    	else{
+    		
+			visible = max;
+			
+    	}
+        
+    	VBox vbox = getFromMap(k,visible.get(this.vf.getMyIndex()));
         InternalMVCCEntry ime = wrap(vbox, visible, vbox == entries.get(k), false, true);
         if(debug) {
             log.debugf("peek key [%s] with max vector clock of %s. returned value is %s",
@@ -168,38 +209,53 @@ public class MultiVersionDataContainer implements DataContainer {
 
     @Override
     public void put(Object k, Object v, long lifespan, long maxIdle, VersionVC version) {
+
+    	
+    	
         VBox prev = entries.get(k);
         InternalCacheEntry e = entryFactory.createNewEntry(k, v, lifespan, maxIdle);
-        VBox newVbox = new VBox(version, e, prev);
+        VBox newVbox = new VBox(version.get(vf.getMyIndex()), e, prev);
 
-        //if the entry does not exist
-        if(prev == null) {
-            prev = entries.putIfAbsent(k, newVbox);
+      //  synchronized (entries) {
+            //if the entry does not exist
             if(prev == null) {
-                if(debug) {
-                    log.debugf("added new value to key [%s] with version %s and value %s", k, newVbox.getVersion(), v);
+                prev = entries.putIfAbsent(k, newVbox);
+                if(prev == null) {
+                    if(debug) {
+                        log.debugf("added new value to key [%s] with version %s and value %s", k, newVbox.getVersion(), v);
+                    }
+                    return ;
                 }
-                return ;
+                //ops... maybe it exists now... lets replace it
+                newVbox.setPrevious(prev);
+                newVbox.updatedVersion();
             }
-            //ops... maybe it exists now... lets replace it
-            newVbox.setPrevious(prev);
-            newVbox.updatedVersion();
-        }
 
-        while(!entries.replace(k, prev, newVbox)) {
-            prev = entries.get(k);
-            newVbox.setPrevious(prev);
-            newVbox.updatedVersion();
-        }
-        if(debug) {
-            log.debugf("added new value to key [%s] with version %s and value %s", k, newVbox.getVersion(), v);
-        }
+            while(!entries.replace(k, prev, newVbox)) {
+                prev = entries.get(k);
+                newVbox.setPrevious(prev);
+                newVbox.updatedVersion();
+            }
+            if(debug) {
+                log.debugf("added new value to key [%s] with version %s and value %s", k, newVbox.getVersion(), v);
+            }
+      //  }
     }
 
     @Override
-    public boolean containsKey(Object k, VersionVC max) {
-        VBox vbox = getFromMap(k,max);
-        InternalMVCCEntry ime = wrap(vbox, commitLog.getMostRecentLessOrEqualThan(max), vbox == entries.get(k), false, false);
+    public boolean containsKey(Object k, VersionVC max, boolean firstTimeOnNode) {
+    	
+    	VersionVC visible;
+    	if(firstTimeOnNode){
+    		visible = commitLog.getMostRecentLessOrEqualThan(max);
+    	}
+    	else{
+    		
+			visible = max;
+			
+    	}
+    	VBox vbox = getFromMap(k,visible.get(this.vf.getMyIndex()));
+        InternalMVCCEntry ime = wrap(vbox, visible, vbox == entries.get(k), false, false);
         if(ime.getValue() == null) {
             entries.remove(k);
             if(debug) {
@@ -218,7 +274,7 @@ public class MultiVersionDataContainer implements DataContainer {
     @Override
     public InternalCacheEntry remove(Object k, VersionVC version) {
         VBox prev = entries.get(k);
-        VBox newVbox = new VBox(version, null, prev);
+        VBox newVbox = new VBox(version.get(vf.getMyIndex()), null, prev);
 
         //if the entry does not exist
         if(prev == null) {
@@ -249,11 +305,11 @@ public class MultiVersionDataContainer implements DataContainer {
     }
 
     @Override
-    public int size(VersionVC max) {
+    public int size(VersionVC max, boolean firstTimeOnNode) {
         Set<Object> keys = entries.keySet();
         int size = 0;
         for(Object k : keys) {
-            InternalMVCCEntry ime = peek(k, max);
+            InternalMVCCEntry ime = peek(k, max, firstTimeOnNode);
             if(ime.getValue() != null) {
                 size++;
             }
@@ -276,18 +332,39 @@ public class MultiVersionDataContainer implements DataContainer {
     }
 
     @Override
-    public Set<Object> keySet(VersionVC max) {
+    public Set<Object> keySet(VersionVC max, boolean firstTimeOnNode) {
         Set<Object> result = new HashSet<Object>();
+        VersionVC visible;
+    	if(firstTimeOnNode){
+    		visible = commitLog.getMostRecentLessOrEqualThan(max);
+    	}
+    	else{
+    		
+			visible = max;
+			
+    	}
+    	
+    	long visibleValue = visible.get(this.vf.getMyIndex());
 
         for(Map.Entry<Object, VBox> entry : entries.entrySet()) {
             Object key = entry.getKey();
             VBox value = entry.getValue();
+            
+            
+            if(visibleValue < 0){
+            	result.add(key);
+            	continue;
+            }
+            
             while(value != null) {
-                if(value.getVersion().isBefore(max)) {
-                    result.add(key);
+                if(value.getVersion() <= visibleValue) {
+                	result.add(key);
                     break;
+                } else {
+                    value = value.getPrevious();
                 }
             }
+            
         }
 
         if(debug) {
@@ -298,11 +375,11 @@ public class MultiVersionDataContainer implements DataContainer {
     }
 
     @Override
-    public Collection<Object> values(VersionVC max) {
+    public Collection<Object> values(VersionVC max, boolean firstTimeOnNode) {
         if(trace) {
             log.tracef("Values with max version %s", max);
         }
-        return new Values(max, size(max));
+        return new Values(max, size(max, firstTimeOnNode));
     }
 
     @Override
@@ -314,13 +391,25 @@ public class MultiVersionDataContainer implements DataContainer {
     }
 
     @Override
-    public void purgeExpired(VersionVC version) {
+    public void purgeExpired(VersionVC version, boolean firstTimeOnNode) {
         if(trace) {
             log.tracef("Purge Expired keys (remove with version %s)", version);
         }
+        VersionVC visible;
+    	if(firstTimeOnNode){
+    		visible = commitLog.getMostRecentLessOrEqualThan(version);
+    	}
+    	else{
+    		
+			visible = version;
+			
+    	}
+    	
+    	long visibleValue = visible.get(this.vf.getMyIndex());
+        
         for (Iterator<VBox> purgeCandidates = entries.values().iterator(); purgeCandidates.hasNext();) {
             VBox vbox = purgeCandidates.next();
-            if (vbox.getVersion().isBefore(version) && vbox.isExpired()) {
+            if (vbox.getVersion()<=visibleValue && vbox.isExpired()) {
                 purgeCandidates.remove();
             }
         }
@@ -332,19 +421,21 @@ public class MultiVersionDataContainer implements DataContainer {
         if(trace) {
             log.tracef("Iterator with actual version");
         }
-        return new EntryIterator(new VBoxIterator(entries.values().iterator(), commitLog.getActualVersion()));
+        return new EntryIterator(new VBoxIterator(entries.values().iterator(), commitLog.getActualVersion(), vf.getMyIndex()));
     }
 
     public void addNewCommittedTransaction(VersionVC newVersion) {
         commitLog.addNewVersion(newVersion);
     }
-
+/*
     public void addNewCommittedTransaction(List<VersionVC> newsVersions) {
         commitLog.addNewVersion(newsVersions);
     }
+    
+  */
 
     @Override
-    public boolean validateKey(Object key, int idx, long value) {
+    public boolean validateKey(Object key, VersionVC version) {
         VBox actual = entries.get(key);
         if(actual == null) {
             if(debug) {
@@ -352,14 +443,15 @@ public class MultiVersionDataContainer implements DataContainer {
             }
             return true;
         }
-        long actualValue = actual.getVersion().get(idx);
-
+        long actualValue = actual.getVersion();
+        
+        long referenceValue = version.get(vf.getMyIndex());
         if(debug) {
-            log.debugf("validate key [%s]. most recent version is %s. compare with value %s in position %s",
-                    key, actual.getVersion(), value, idx);
+            log.debugf("validate key [%s]. most recent version is %s. compare with value %s",
+                    key, actual.getVersion(), referenceValue);
         }
 
-        return actualValue <= value;
+        return actualValue <= referenceValue;
     }
 
     /**
@@ -377,7 +469,7 @@ public class MultiVersionDataContainer implements DataContainer {
 
         @Override
         public Iterator<Object> iterator() {
-            return new ValueIterator(new VBoxIterator(entries.values().iterator(), version));
+            return new ValueIterator(new VBoxIterator(entries.values().iterator(), version, vf.getMyIndex()));
         }
 
         @Override
@@ -440,7 +532,6 @@ public class MultiVersionDataContainer implements DataContainer {
     private class EntrySet extends AbstractSet<InternalCacheEntry> {
 
         private VersionVC max;
-
         public EntrySet(VersionVC max) {
             this.max = max;
         }
@@ -457,7 +548,7 @@ public class MultiVersionDataContainer implements DataContainer {
             if(max == null) {
                 ice = get(e.getKey());
             } else {
-                ice = get(e.getKey(), max).getValue();
+                ice = get(e.getKey(), max, true).getValue();
             }
 
             return ice != null && ice.getValue().equals(e.getValue());
@@ -466,9 +557,9 @@ public class MultiVersionDataContainer implements DataContainer {
         @Override
         public Iterator<InternalCacheEntry> iterator() {
             if(max != null) {
-                return new ImmutableEntryIterator(new VBoxIterator(entries.values().iterator(), max));
+                return new ImmutableEntryIterator(new VBoxIterator(entries.values().iterator(), max, vf.getMyIndex()));
             } else {
-                return new ImmutableEntryIterator(new VBoxIterator(entries.values().iterator(), commitLog.getActualVersion()));
+                return new ImmutableEntryIterator(new VBoxIterator(entries.values().iterator(), commitLog.getActualVersion(), vf.getMyIndex()));
             }
         }
 
@@ -482,11 +573,13 @@ public class MultiVersionDataContainer implements DataContainer {
         Iterator<VBox> currentIterator;
         VBox next;
         VersionVC max;
+        long maxValue;
 
-        private VBoxIterator(Iterator<VBox> it, VersionVC max) {
+        private VBoxIterator(Iterator<VBox> it, VersionVC max, int referenceIndex) {
             currentIterator = it;
             next = null;
             this.max = max;
+            this.maxValue = max.get(referenceIndex);
             findNext();
         }
 
@@ -512,7 +605,7 @@ public class MultiVersionDataContainer implements DataContainer {
             while(currentIterator.hasNext()) {
                 VBox vbox = currentIterator.next();
                 while(vbox != null) {
-                    if(vbox.getVersion().isBefore(max)) {
+                    if(vbox.getVersion() <= maxValue) {
                         next = vbox;
                         return;
                     } else {
@@ -520,6 +613,83 @@ public class MultiVersionDataContainer implements DataContainer {
                     }
                 }
             }
+        }
+    }
+    
+    
+    /**
+     * @author pedro
+     * @author <a href="mailto:peluso@gsd.inesc-id.pt">Sebastiano Peluso</a>
+     * @since 5.0        
+     */
+     class VBox {
+    	
+
+        long version;
+        InternalCacheEntry value;
+        VBox previous;
+
+        public VBox(long version, InternalCacheEntry value, VBox previous) {
+            this.version = version;
+            this.value = value;
+            this.previous = previous;
+            updatedVersion();
+        }
+
+        public long getVersion() {
+            return version;
+        }
+
+        public InternalCacheEntry getValue(boolean touch) {
+            if(touch && value != null) {
+                value.touch();
+            }
+            return value;
+        }
+
+        public VBox getPrevious() {
+            return previous;
+        }
+
+        public void setPrevious(VBox previous) {
+            this.previous = previous;
+        }
+
+        public boolean isExpired() {
+            return value != null && value.isExpired();
+        }
+        
+        public void updatedVersion() {
+        	
+        	if(previous == null) {
+        		return ;
+        	}
+        		
+        	//We need this line for non-transactional writes
+        	if(previous.version > version){
+        		version = previous.version;
+        		
+        	}
+        	
+        		
+        	
+        }
+   
+
+        public String getVBoxChain() {
+            return new StringBuilder("VBox{")
+                    .append("version=").append(version)
+                    .append(",value=").append(value).append("};")
+                    .append(previous != null ? previous.getVBoxChain() : "null")
+                    .toString();
+        }
+
+        @Override
+        public String toString() {
+            return new StringBuilder("VBox{")
+                    .append("version=").append(version)
+                    .append(",value=").append(value)
+                    .append('}').toString();
         }
     }
 }

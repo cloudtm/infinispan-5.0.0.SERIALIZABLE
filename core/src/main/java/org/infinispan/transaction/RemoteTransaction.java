@@ -37,6 +37,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * Defines the state of a remotely originated transaction.
@@ -50,21 +51,28 @@ public class RemoteTransaction extends AbstractCacheTransaction implements Clone
 
     private volatile boolean valid = true;
 
+    //Sebastiano
+    private CountDownLatch prepareCountDown;
+
     public RemoteTransaction(WriteCommand[] modifications, GlobalTransaction tx) {
         this.modifications = modifications == null || modifications.length == 0 ? Collections.<WriteCommand>emptyList() : Arrays.asList(modifications);
         lookedUpEntries = new BidirectionalLinkedHashMap<Object, CacheEntry>(this.modifications.size());
         this.tx = tx;
+        this.prepareCountDown = new CountDownLatch(1);
     }
 
     public RemoteTransaction(GlobalTransaction tx) {
         this.modifications = new LinkedList<WriteCommand>();
         lookedUpEntries = new BidirectionalLinkedHashMap<Object, CacheEntry>();
         this.tx = tx;
+        this.prepareCountDown = new CountDownLatch(1);
     }
 
     public void invalidate() {
         valid = false;
     }
+
+
 
     public void putLookedUpEntry(Object key, CacheEntry e) {
         if (valid) {
@@ -123,7 +131,47 @@ public class RemoteTransaction extends AbstractCacheTransaction implements Clone
     }
 
     @Override
-    public void addReadKey(Object key, InternalMVCCEntry ime) {
+    public void addLocalReadKey(Object key, InternalMVCCEntry ime) {
         //no-op
+    }
+    
+    @Override
+    public void removeLocalReadKey(Object key) {
+        //no-op
+    
+    }
+    
+    @Override
+    public void removeRemoteReadKey(Object key){
+    	//no-op
+    }
+    
+    @Override
+    public void addRemoteReadKey(Object key, InternalMVCCEntry ime) {
+        //no-op
+    }
+
+    //Sebastiano
+    public void waitForPrepare() {
+
+        boolean prepared = false;
+
+        while(!prepared){
+            try {
+                this.prepareCountDown.await();
+                prepared = true;
+
+            } catch (InterruptedException e) {
+                prepared = false;
+            }
+        }
+
+    }
+
+    //Sebastiano
+    public void notifyEndPrepare() {
+
+        this.prepareCountDown.countDown();
+
     }
 }

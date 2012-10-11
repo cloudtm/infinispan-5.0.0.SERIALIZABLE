@@ -28,6 +28,7 @@ import org.infinispan.commands.control.RehashControlCommand;
 import org.infinispan.commands.control.StateTransferControlCommand;
 import org.infinispan.commands.module.ModuleCommandInitializer;
 import org.infinispan.commands.read.*;
+import org.infinispan.commands.read.serializable.SerialGetKeyValueCommand;
 import org.infinispan.commands.remote.ClusteredGetCommand;
 import org.infinispan.commands.remote.MultipleRpcCommand;
 import org.infinispan.commands.remote.SingleRpcCommand;
@@ -53,6 +54,7 @@ import org.infinispan.factories.annotations.Start;
 import org.infinispan.interceptors.InterceptorChain;
 import org.infinispan.mvcc.CommitLog;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.notifications.cachelistener.CacheNotifier;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.transaction.RemoteTransaction;
@@ -75,6 +77,7 @@ import java.util.concurrent.Callable;
  * @author Mircea.Markus@jboss.com
  * @author Galder Zamarreño
  * @author Sanne Grinovero <sanne@hibernate.org> (C) 2011 Red Hat Inc.
+ * @author <a href="mailto:peluso@gsd.inesc-id.pt">Sebastiano Peluso</a>
  * @since 4.0
  */
 public class CommandsFactoryImpl implements CommandsFactory {
@@ -102,13 +105,14 @@ public class CommandsFactoryImpl implements CommandsFactory {
 
     private Map<Byte, ModuleCommandInitializer> moduleCommandInitializers;
     private CommitLog commitLog;
+    private VersionVCFactory versionVCFactory;
 
     @Inject
     public void setupDependencies(DataContainer container, CacheNotifier notifier, Cache cache,
                                   InterceptorChain interceptorChain, DistributionManager distributionManager,
                                   InvocationContextContainer icc, TransactionTable txTable, Configuration configuration,
                                   @ComponentName(KnownComponentNames.MODULE_COMMAND_INITIALIZERS) Map<Byte, ModuleCommandInitializer> moduleCommandInitializers,
-                                  RecoveryManager recoveryManager, CommitLog commitLog) {
+                                  RecoveryManager recoveryManager, CommitLog commitLog, VersionVCFactory versionVCFactory) {
         this.dataContainer = container;
         this.notifier = notifier;
         this.cache = cache;
@@ -120,6 +124,7 @@ public class CommandsFactoryImpl implements CommandsFactory {
         this.moduleCommandInitializers = moduleCommandInitializers;
         this.recoveryManager = recoveryManager;
         this.commitLog = commitLog;
+        this.versionVCFactory=versionVCFactory;
     }
 
     @Start(priority = 1)
@@ -178,10 +183,16 @@ public class CommandsFactoryImpl implements CommandsFactory {
             cachedEntrySetCommand = new EntrySetCommand(dataContainer);
         }
         return cachedEntrySetCommand;
+
     }
 
     public GetKeyValueCommand buildGetKeyValueCommand(Object key, Set<Flag> flags) {
-        return new GetKeyValueCommand(key, notifier, flags);
+    	if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE){
+    		return new SerialGetKeyValueCommand(key, notifier, flags);
+    	}
+    	else{
+    		return new GetKeyValueCommand(key, notifier, flags);
+    	}
     }
 
     public PutMapCommand buildPutMapCommand(Map map, long lifespan, long maxIdleTimeMillis, Set<Flag> flags) {
@@ -203,9 +214,17 @@ public class CommandsFactoryImpl implements CommandsFactory {
     }
 
     public PrepareCommand buildPrepareCommand(GlobalTransaction gtx, List<WriteCommand> modifications,
-                                              Set<Object> readSet, VersionVC version,
+                                              Object[] readSet, VersionVC version,
                                               boolean onePhaseCommit) {
         PrepareCommand command = new PrepareCommand(gtx, onePhaseCommit, readSet, version, modifications);
+        command.setCacheName(cacheName);
+        return command;
+    }
+
+    @Override
+    public TotalOrderPrepareCommand buildTotalOrderPrepareCommand(GlobalTransaction gtx, List<WriteCommand> modifications,
+                                                                  Object[] readSet, VersionVC version, boolean onePhaseCommit) {
+        TotalOrderPrepareCommand command = new TotalOrderPrepareCommand(gtx, readSet, version, modifications);
         command.setCacheName(cacheName);
         return command;
     }
@@ -285,7 +304,7 @@ public class CommandsFactoryImpl implements CommandsFactory {
             case PrepareCommand.COMMAND_ID:
                 PrepareCommand pc = (PrepareCommand) c;
                 pc.init(interceptorChain, icc, txTable);
-                pc.initialize(notifier, recoveryManager);
+                pc.initialize(notifier, recoveryManager, this.versionVCFactory);
                 if (pc.getModifications() != null)
                     for (ReplicableCommand nested : pc.getModifications())  {
                         initializeReplicableCommand(nested, false);
@@ -294,9 +313,12 @@ public class CommandsFactoryImpl implements CommandsFactory {
                 if (configuration.isEnableDeadlockDetection() && isRemote) {
                     DldGlobalTransaction transaction = (DldGlobalTransaction) pc.getGlobalTransaction();
                     transaction.setLocksHeldAtOrigin(pc.getAffectedKeys());
+                    /*
                     if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
                         transaction.setReadLocksHeldAtOrigin(pc.getReadSet());
                     }
+                    
+                    */
                 }
                 break;
             case CommitCommand.COMMAND_ID:
@@ -315,7 +337,7 @@ public class CommandsFactoryImpl implements CommandsFactory {
                 break;
             case ClusteredGetCommand.COMMAND_ID:
                 ClusteredGetCommand clusteredGetCommand = (ClusteredGetCommand) c;
-                clusteredGetCommand.initialize(icc, this, interceptorChain, distributionManager, commitLog);
+                clusteredGetCommand.initialize(icc, this, interceptorChain, distributionManager, commitLog, versionVCFactory);
                 break;
             case LockControlCommand.COMMAND_ID:
                 LockControlCommand lcc = (LockControlCommand) c;
@@ -369,7 +391,7 @@ public class CommandsFactoryImpl implements CommandsFactory {
             case TotalOrderPrepareCommand.COMMAND_ID:
                 TotalOrderPrepareCommand topc = (TotalOrderPrepareCommand) c;
                 topc.init(interceptorChain, icc, txTable);
-                topc.initialize(notifier, recoveryManager);
+                topc.initialize(notifier, recoveryManager, this.versionVCFactory);
                 if(topc.getModifications() != null) {
                     for (ReplicableCommand nested : topc.getModifications())  {
                         initializeReplicableCommand(nested, false);

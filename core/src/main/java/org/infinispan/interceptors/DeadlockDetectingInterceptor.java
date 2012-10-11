@@ -98,9 +98,11 @@ public class DeadlockDetectingInterceptor extends CommandInterceptor {
         boolean useSerializable = configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE;
         if (ctx.isOriginLocal()) {
             globalTransaction.setRemoteLockIntention(command.getAffectedKeys());
+            /*
             if(useSerializable) {
                 globalTransaction.setRemoteReadLockIntention(command.getReadSet());
             }
+            */
         }
         Object result = invokeNextInterceptor(ctx, command);
         if (ctx.isOriginLocal()) {

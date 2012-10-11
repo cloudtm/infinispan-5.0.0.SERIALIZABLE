@@ -44,6 +44,9 @@ import org.infinispan.distribution.L1Manager;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.factories.annotations.Start;
 import org.infinispan.interceptors.base.BaseRpcInterceptor;
+import org.infinispan.jmx.annotations.MBean;
+import org.infinispan.jmx.annotations.ManagedAttribute;
+import org.infinispan.jmx.annotations.ManagedOperation;
 import org.infinispan.remoting.responses.Response;
 import org.infinispan.remoting.responses.SuccessfulResponse;
 import org.infinispan.remoting.transport.Address;
@@ -54,8 +57,14 @@ import org.infinispan.util.Immutables;
 import org.infinispan.util.Util;
 import org.infinispan.util.concurrent.NotifyingFutureImpl;
 import org.infinispan.util.concurrent.NotifyingNotifiableFuture;
+import org.rhq.helpers.pluginAnnotations.agent.DisplayType;
+import org.rhq.helpers.pluginAnnotations.agent.MeasurementType;
+import org.rhq.helpers.pluginAnnotations.agent.Metric;
+import org.rhq.helpers.pluginAnnotations.agent.Operation;
+import org.rhq.helpers.pluginAnnotations.agent.Parameter;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * The interceptor that handles distribution of entries across a cluster, as well as transparent lookup
@@ -65,6 +74,7 @@ import java.util.*;
  * @author Pete Muir
  * @since 4.0
  */
+@MBean(objectName = "DistributionInterceptor", description = "Handles distribution of entries across a cluster, as well as transparent lookup.")
 public class DistributionInterceptor extends BaseRpcInterceptor {
     DistributionManager dm;
     CommandsFactory cf;
@@ -73,6 +83,15 @@ public class DistributionInterceptor extends BaseRpcInterceptor {
     EntryFactory entryFactory;
     L1Manager l1Manager;
     private TotalOrderTransactionManager totMan;
+    
+    
+    private final AtomicLong totalNumOfInvolvedNodesPerPrepare = new AtomicLong(0L);
+    private final AtomicLong totalPrepareSent = new AtomicLong(0L);
+    
+    
+    @ManagedAttribute(description = "Enables or disables the gathering of statistics by this component", writable = true)
+    protected boolean statisticsEnabled;
+
 
     static final RecipientGenerator CLEAR_COMMAND_GENERATOR = new RecipientGenerator() {
         public List<Address> generateRecipients() {
@@ -92,12 +111,14 @@ public class DistributionInterceptor extends BaseRpcInterceptor {
         this.entryFactory = entryFactory;
         this.l1Manager = l1Manager;
         this.totMan = totMan;
+        
     }
 
     @Start
     public void start() {
         isL1CacheEnabled = configuration.isL1CacheEnabled();
         needReliableReturnValues = !configuration.isUnsafeUnreliableReturnValues();
+        setStatisticsEnabled(configuration.isExposeJmxStatistics());
 
     }
 
@@ -169,7 +190,7 @@ public class DistributionInterceptor extends BaseRpcInterceptor {
         return null;
     }
 
-    private Object realRemoteGet(InvocationContext ctx, Object key, boolean storeInL1, boolean isWrite) throws Throwable {
+    protected Object realRemoteGet(InvocationContext ctx, Object key, boolean storeInL1, boolean isWrite) throws Throwable {
         if (trace) log.tracef("Doing a remote get for key %s", key);
         // attempt a remote lookup
         InternalCacheEntry ice = dm.retrieveFromRemoteSource(key, ctx);
@@ -278,7 +299,7 @@ public class DistributionInterceptor extends BaseRpcInterceptor {
     /**
      * If the response to a commit is a request to resend the prepare, respond accordingly *
      */
-    private boolean needToResendPrepare(Response r) {
+    protected boolean needToResendPrepare(Response r) {
         return r instanceof SuccessfulResponse && Byte.valueOf(CommitCommand.RESEND_PREPARE).equals(((SuccessfulResponse) r).getResponseValue());
     }
 
@@ -346,7 +367,21 @@ public class DistributionInterceptor extends BaseRpcInterceptor {
             if (isL1CacheEnabled && command.isOnePhaseCommit())
                 f = l1Manager.flushCache(ctx.getLockedKeys(), null, null);
             // this method will return immediately if we're the only member (because exclude_self=true)
-            rpcManager.invokeRemotely(recipients, command, sync);
+            
+            Map<Address, Response> responses = rpcManager.invokeRemotely(recipients, command, sync, false);
+            
+            
+            if(this.statisticsEnabled){
+            	Set<Address> involvedNodes = responses.keySet();
+
+            	int numResponses = (involvedNodes == null)? 0 : involvedNodes.size();
+
+            	this.totalNumOfInvolvedNodesPerPrepare.addAndGet(numResponses);
+            	this.totalPrepareSent.incrementAndGet();
+
+            }
+            
+            
             ((LocalTxInvocationContext) ctx).remoteLocksAcquired(recipients);
             if (f != null) f.get();
         }
@@ -356,7 +391,7 @@ public class DistributionInterceptor extends BaseRpcInterceptor {
     @Override
     public Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable {
         if (shouldInvokeRemoteTxCommand(ctx))
-            rpcManager.invokeRemotely(dm.getAffectedNodes(ctx.getAffectedKeys()), command, configuration.isSyncRollbackPhase(), false);
+            rpcManager.invokeRemotely(dm.getAffectedNodes(ctx.getAffectedKeys()), command, configuration.isSyncRollbackPhase(), true);
         return invokeNextInterceptor(ctx, command);
     }
 
@@ -547,5 +582,31 @@ public class DistributionInterceptor extends BaseRpcInterceptor {
             totMan.waitValidation(command.getGlobalTransaction());
         }
         return retVal;
+    }
+    
+    @Operation(displayName = "Enable/disable statistics")
+    public void setStatisticsEnabled(@Parameter(name = "enabled", description = "Whether statistics should be enabled or disabled (true/false)") boolean enabled) {
+        this.statisticsEnabled = enabled;
+    }
+    
+    @ManagedOperation(description = "Resets statistics gathered by this component")
+    @Operation(displayName = "Reset Statistics")
+    public void resetStatistics() {
+        
+    	this.totalNumOfInvolvedNodesPerPrepare.set(0L);
+    	this.totalPrepareSent.set(0L);
+        
+    }
+    
+    @ManagedAttribute(description = "Total number of involved nodes per prepare phase.")
+    @Metric(displayName = "TotalNumOfInvolvedNodesPerPrepare", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getTotalNumOfInvolvedNodesPerPrepare() {
+        return this.totalNumOfInvolvedNodesPerPrepare.get();
+    }
+    
+    @ManagedAttribute(description = "Total number of prepare message sent.")
+    @Metric(displayName = "TotalPrepareSent", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getTotalPrepareSent() {
+        return this.totalPrepareSent.get();
     }
 }

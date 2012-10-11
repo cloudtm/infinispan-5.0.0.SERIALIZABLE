@@ -44,9 +44,8 @@ import org.jgroups.blocks.Request;
 import org.jgroups.blocks.RequestOptions;
 import org.jgroups.blocks.RpcDispatcher;
 import org.jgroups.blocks.RspFilter;
-import org.jgroups.groups.GroupAddress;
+//import org.jgroups.groups.GroupAddress;
 import org.jgroups.util.*;
-import org.rhq.helpers.pluginAnnotations.agent.Parameter;
 
 import java.io.NotSerializableException;
 import java.util.*;
@@ -116,7 +115,8 @@ public class CommandAwareRpcDispatcher extends RpcDispatcher {
             throws NotSerializableException, ExecutionException, InterruptedException {
 
         ReplicationTask task = new ReplicationTask(command, oob, dests, mode, timeout, anycasting, filter, supportReplay, broadcast);
-
+        
+/*Pedro
         boolean totalOrderCommand = command instanceof TotalOrderPrepareCommand;
         if(totalOrderCommand) {
             task.setMulticast(((TotalOrderPrepareCommand)command).isPartialReplication());
@@ -129,8 +129,8 @@ public class CommandAwareRpcDispatcher extends RpcDispatcher {
         task.setTotalOrder(totalOrderCommand);
         task.setVote(vote);
         task.setOOB(noFifoNeeded);
-
-        if (asyncMarshalling && !totalOrderCommand) {
+*/
+        if (asyncMarshalling /*&& Pedro !totalOrderCommand*/) {
             asyncExecutor.submit(task);
             return null; // don't wait for a response!
         } else {
@@ -227,7 +227,9 @@ public class CommandAwareRpcDispatcher extends RpcDispatcher {
                 msg.setFlag(Message.NO_FC);
             }
             msg.setFlag(Message.NO_TOTAL_ORDER);
-            if (recipient != null) msg.setDest(recipient);
+            if (recipient != null) {
+                msg.setDest(recipient);
+            }
             return msg;
         }
 
@@ -283,9 +285,14 @@ public class CommandAwareRpcDispatcher extends RpcDispatcher {
             RspList retval = null;
             Buffer buf;
             //Pedro -- added multicast e abcast condition
+            /*
             if(totalOrder) {
                 RequestOptions opts = new RequestOptions();
-                opts.setMode(Request.GET_NONE);
+                if(((TotalOrderPrepareCommand)command).isSerializability()) {
+                    opts.setMode(Request.GET_ALL);
+                } else {
+                    opts.setMode(Request.GET_NONE);
+                }
                 opts.setTimeout(timeout);
                 opts.setRspFilter(filter);
                 opts.setAnycasting(false);
@@ -312,7 +319,7 @@ public class CommandAwareRpcDispatcher extends RpcDispatcher {
                 }
 
                 retval = castMessage(target, msg , opts);
-            } else if (broadcast || FORCE_MCAST) {
+            } else */if (broadcast || FORCE_MCAST) {
                 RequestOptions opts = new RequestOptions();
                 opts.setMode(mode);
                 opts.setTimeout(timeout);
@@ -353,6 +360,8 @@ public class CommandAwareRpcDispatcher extends RpcDispatcher {
 
                     retval = new RspList();
 
+
+
                     // a get() on each future will block till that call completes.
                     for (Map.Entry<Address, Future<Object>> entry : futures.entrySet()) {
                         try {
@@ -362,6 +371,8 @@ public class CommandAwareRpcDispatcher extends RpcDispatcher {
                                     prettyPrintTime(timeout), entry.getKey()));
                         }
                     }
+
+
 
                 } else if (mode == Request.GET_NONE) {
                     // An ASYNC call.  We don't care about responses.

@@ -25,12 +25,14 @@ public class InternalMVCCEntry {
         this.mostRecent = mostRecent;
     }
 
+   
     public InternalMVCCEntry(VersionVC visible, boolean mostRecent) {
         this(null, visible, mostRecent);
     }
 
     public InternalCacheEntry getValue() {
-        return (value != null ? value.clone() : null);
+        
+    	return value;
     }
 
     public VersionVC getVersion() {
@@ -40,6 +42,9 @@ public class InternalMVCCEntry {
     public boolean isMostRecent() {
         return mostRecent;
     }
+    
+    
+ 
 
     @Override
     public String toString() {

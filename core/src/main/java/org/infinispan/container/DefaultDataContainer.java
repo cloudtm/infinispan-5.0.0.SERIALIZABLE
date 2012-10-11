@@ -31,6 +31,7 @@ import org.infinispan.eviction.EvictionThreadPolicy;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.util.Immutables;
 import org.infinispan.util.concurrent.BoundedConcurrentHashMap;
 import org.infinispan.util.concurrent.BoundedConcurrentHashMap.Eviction;
@@ -303,12 +304,12 @@ public class DefaultDataContainer implements DataContainer {
      */
 
     @Override
-    public InternalMVCCEntry get(Object k, VersionVC max) {
+    public InternalMVCCEntry get(Object k, VersionVC ma, boolean firstTimeOnNode) {
         throw new UnsupportedOperationException("bla?");
     }
 
     @Override
-    public InternalMVCCEntry peek(Object k, VersionVC max) {
+    public InternalMVCCEntry peek(Object k, VersionVC max, boolean firstTimeOnNode) {
         throw new UnsupportedOperationException("bla?");
     }
 
@@ -318,7 +319,7 @@ public class DefaultDataContainer implements DataContainer {
     }
 
     @Override
-    public boolean containsKey(Object k, VersionVC max) {
+    public boolean containsKey(Object k, VersionVC max, boolean firstTimeOnNode) {
         throw new UnsupportedOperationException("bla?");
     }
 
@@ -328,7 +329,7 @@ public class DefaultDataContainer implements DataContainer {
     }
 
     @Override
-    public int size(VersionVC max) {
+    public int size(VersionVC max, boolean firstTimeOnNode) {
         throw new UnsupportedOperationException("bla?");
     }
 
@@ -338,12 +339,12 @@ public class DefaultDataContainer implements DataContainer {
     }
 
     @Override
-    public Set<Object> keySet(VersionVC max) {
+    public Set<Object> keySet(VersionVC max, boolean firstTimeOnNode) {
         throw new UnsupportedOperationException("bla?");
     }
 
     @Override
-    public Collection<Object> values(VersionVC max) {
+    public Collection<Object> values(VersionVC max, boolean firstTimeOnNode) {
         throw new UnsupportedOperationException("bla?");
     }
 
@@ -353,12 +354,12 @@ public class DefaultDataContainer implements DataContainer {
     }
 
     @Override
-    public void purgeExpired(VersionVC version) {
+    public void purgeExpired(VersionVC version, boolean firstTimeOnNode) {
         throw new UnsupportedOperationException("bla?");
     }
 
     @Override
-    public boolean validateKey(Object key, int idx, long value) {
+    public boolean validateKey(Object key, VersionVC version) {
         throw new UnsupportedOperationException("bla?");
     }
 }

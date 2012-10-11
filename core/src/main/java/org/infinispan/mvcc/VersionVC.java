@@ -1,195 +1,409 @@
 package org.infinispan.mvcc;
 
 import java.io.*;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.infinispan.mvcc.exception.VersionVCDimensionException;
+
 /**
- * @author pedro
- *         Date: 25-07-2011
+ * VersionVC are logical vector clocks assiociated to committed <key,value> versions
+ *
+ *
+ * @author <a href="mailto:peluso@gsd.inesc-id.pt">Sebastiano Peluso</a>
+ * @since 5.0
  */
-public class VersionVC implements Externalizable, Serializable {
-    public static transient final long EMPTY_POSITION = -1;
-    public static transient final VersionVC EMPTY_VERSION = new VersionVC();
+public class VersionVC implements Externalizable, Serializable, Cloneable {
+    public static final long EMPTY_POSITION = -1;
+    //public static transient final VersionVC EMPTY_VERSION = new VersionVC();
 
-    protected Map<Integer,Long> vectorClock;
+    protected long[] vectorClock;
+    
+    private boolean isEmpty;
 
-    public VersionVC() {
-        vectorClock = new HashMap<Integer, Long>();
+    
+    public VersionVC(int dimension) {
+        vectorClock = new long[dimension];
+        for(int i=0; i<vectorClock.length; i++){
+        	this.vectorClock[i]=EMPTY_POSITION;
+        }
+        
+        this.isEmpty = true;
+    }
+    
+    public VersionVC(){
+    	this.vectorClock=null;
+    	 this.isEmpty = true;
     }
 
-    /**
-     * Compares two vector clocks ands returns true if *this* is less or equals than the *other*.
-     * For any two vector clocks, v1 and v2,v1 is less or equals than v2 iff for each position i,
-     * v1[i] <= v2[i] || v1[i] == null || v2[i] == null
-     * @param other vector clock to compare
-     * @return true if *this* vector clock is less or equals to the *other* vector clock
-     */
-    public boolean isBefore(VersionVC other) {
+    public boolean isBefore(VersionVC other) throws VersionVCDimensionException{
         if(other == null) {
             return true;
         }
+        if(other.vectorClock==null){
+        	return true;
+        }
+        if(this.vectorClock==null){
+        	return true;
+        }
+        
+        if(this.vectorClock.length!=other.vectorClock.length) throw new VersionVCDimensionException("Error: unable to compare VersionVC objects having different dimension");
 
-        Set<Integer> keySet = new HashSet<Integer>(other.vectorClock.keySet());
-        keySet.addAll(this.vectorClock.keySet());
-
-        for(Integer pos : keySet) {
-            long otherValue = other.get(pos);
-            long myValue = this.get(pos);
-            if(otherValue != EMPTY_POSITION && myValue != EMPTY_POSITION && myValue > otherValue) {
+        for(int i=0; i<this.vectorClock.length; i++) {
+        	
+            if(this.vectorClock[i]!=EMPTY_POSITION && other.vectorClock[i]!= EMPTY_POSITION && this.vectorClock[i] > other.vectorClock[i]) {
                 return false;
             }
         }
         return true;
     }
-
-    public boolean isAfter(VersionVC other) {
+    
+    public boolean isBefore(VersionVC other, int referenceIndex) throws VersionVCDimensionException{
         if(other == null) {
             return true;
         }
-
-        Set<Integer> keySet = new HashSet<Integer>(other.vectorClock.keySet());
-        keySet.addAll(this.vectorClock.keySet());
-
-        for(Integer pos : keySet) {
-            long otherValue = other.get(pos);
-            long myValue = this.get(pos);
-            if(otherValue != EMPTY_POSITION && myValue != EMPTY_POSITION && myValue < otherValue) {
-                return false;
-            }
+        if(other.vectorClock==null){
+        	return true;
         }
+        if(this.vectorClock==null){
+        	return true;
+        }
+        if(referenceIndex == -1){
+        	return true;
+        }
+        
+        if(this.vectorClock.length!=other.vectorClock.length) throw new VersionVCDimensionException("Error: unable to compare VersionVC objects having different dimension");
+        
+        if(referenceIndex >= this.vectorClock.length || referenceIndex < 0) throw new VersionVCDimensionException("Error: referenceIndex out of bounds");
+
+        
+        	
+        if(this.vectorClock[referenceIndex]!=EMPTY_POSITION && other.vectorClock[referenceIndex]!= EMPTY_POSITION && this.vectorClock[referenceIndex] > other.vectorClock[referenceIndex]) {
+           return false;
+        }
+        
         return true;
     }
 
-    /**
-     * Compares two vector clocks ands returns true if *this* is equals than the *other*.
-     * For any two vector clocks, v1 and v2,v1 is equals than v2 iff for each position i,
-     * v1[i] == v2[i] || v1[i] == null || v2[i] == null
-     * @param other vector clock to compare
-     * @return true if *this* vector clock is equals to the *other* vector clock
-     */
-    public boolean isEquals(VersionVC other) {
-        if(other == null) {
-            return true;
+   
+    public boolean isAfterInPosition(VersionVC other, Integer position) throws VersionVCDimensionException{
+    	
+    	if(other == null) {
+    		return true;
+    	}
+    	if(other.vectorClock == null){
+    		return true;
+    	}
+    	if(this.vectorClock == null){
+    		return false;
+    	}
+
+    	if(this.vectorClock.length!=other.vectorClock.length ) throw new VersionVCDimensionException("Error: unable to compare VersionVC objects having different dimension");
+
+    	if(position>=this.vectorClock.length) throw new VersionVCDimensionException("Error: unable to compare VersionVC objects at position "+position);
+
+
+    	return this.vectorClock[position]!=EMPTY_POSITION && other.vectorClock[position]!= EMPTY_POSITION && this.vectorClock[position] > other.vectorClock[position];
+    		
+    }
+    
+    
+    public boolean isEmpty(){
+    	
+    	/*
+    	if(this.vectorClock == null) return true;
+    	
+    	for(int i=0; i<this.vectorClock.length; i++){
+    		if(this.vectorClock[i]!=EMPTY_POSITION){
+    			return false;
+    		}
+    	}
+    	
+    	*/
+    	
+    	return this.isEmpty;
+    }
+    
+    
+
+    
+
+	@Override
+	public int hashCode() {
+		final int prime = 31;
+		int result = 1;
+		result = prime * result + Arrays.hashCode(vectorClock);
+		return result;
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj)
+			return true;
+		if (obj == null)
+			return false;
+		if (getClass() != obj.getClass())
+			return false;
+		VersionVC other = (VersionVC) obj;
+		if (!Arrays.equals(vectorClock, other.vectorClock))
+			return false;
+		return true;
+	}
+
+	
+   
+    public boolean equalsInPosition(VersionVC other, Integer position) throws VersionVCDimensionException{
+    	if(other == null){
+    		return false;
+    	}
+    	if(other.vectorClock == this.vectorClock) {
+    		return true;
+    	}
+    	if(other.vectorClock == null || this.vectorClock == null){
+    		return false;
+    	}
+    	
+    	if(this.vectorClock.length!=other.vectorClock.length) throw new VersionVCDimensionException("Error: unable to compare VersionVC objects having different dimension");
+
+    	if(position>=this.vectorClock.length) throw new VersionVCDimensionException("Error: unable to compare VersionVC objects at position "+position);
+
+
+        
+        return this.vectorClock[position] == other.vectorClock[position];
+    	
+    	
+    }
+    
+
+    public long get(Integer position) throws VersionVCDimensionException{
+    	
+    	if(this.vectorClock == null) return EMPTY_POSITION;
+    	
+    	
+    	if(position>=this.vectorClock.length) throw new VersionVCDimensionException("Error: unable to get value at position "+position);
+
+        return this.vectorClock[position];
+    }
+
+    public void set(VersionVCFactory factory, Integer position, long value) throws VersionVCDimensionException{
+    	
+    	if(this.vectorClock == null){
+     	   VersionVC newVersion= factory.createVersionVC();
+     	   
+     	   this.vectorClock=new long[newVersion.vectorClock.length];
+            
+           System.arraycopy(newVersion.vectorClock,0, this.vectorClock,0,newVersion.vectorClock.length);
+     	   
         }
+    	
+    	if(position>=this.vectorClock.length) throw new VersionVCDimensionException("Error: unable to put value at position "+position);
 
-        Set<Integer> keySet = new HashSet<Integer>(other.vectorClock.keySet());
-        keySet.addAll(this.vectorClock.keySet());
-
-        for(Integer pos : keySet) {
-            long otherValue = other.get(pos);
-            long myValue = this.get(pos);
-            if(otherValue != EMPTY_POSITION && myValue != EMPTY_POSITION && myValue != otherValue) {
-                return false;
-            }
+        this.vectorClock[position]=value;
+        
+        if(this.isEmpty && value!=EMPTY_POSITION){
+        	this.isEmpty = false;
         }
-        return true;
     }
 
-    public long get(Integer position) {
-        Long l = vectorClock.get(position);
-        return l != null ? l : EMPTY_POSITION;
-    }
-
-    public void set(Integer position, long value) {
-        vectorClock.put(position, value);
-    }
-
-    /**
-     * change this vector clock to the maximum between this and the other.
-     * The maximum is defined this way:
-     *   i) if the position exists in both vector clocks, then it is the maximum value
-     *   ii) if the position exists only in *this*, then it remains unchanged
-     *   iii) if the position exists only in *other*, then it is putted in *this* vector clock
-     * @param other the other vector clock
-     */
-    public void setToMaximum(VersionVC other) {
-        if(other == null) {
+    
+    public void setToMaximum(VersionVC other) throws VersionVCDimensionException{
+        if(other == null || other.vectorClock==null) {
             return;
         }
-        for(Map.Entry<Integer, Long> entry : other.vectorClock.entrySet()) {
-            Integer key = entry.getKey();
-            Long otherValue = entry.getValue();
-            Long myValue = this.vectorClock.get(key);
-            if(myValue == null || myValue < otherValue) {
-                this.vectorClock.put(key, otherValue);
-            }
+        
+        if(this.vectorClock == null){
+        	this.vectorClock = new long[other.vectorClock.length];
+        			
+        	System.arraycopy(other.vectorClock,0, this.vectorClock,0,other.vectorClock.length);
         }
+        
+        if(this.vectorClock.length!=other.vectorClock.length){
+        	throw new VersionVCDimensionException("Error: unable to compare VersionVC objects having different dimension. This: "+this+". Other: "+other);
+        }
+
+        
+        for(int i=0; i<this.vectorClock.length; i++){
+        	if(this.vectorClock[i]<other.vectorClock[i]){
+        		this.vectorClock[i]=other.vectorClock[i];
+        		if(this.isEmpty && other.vectorClock[i] != EMPTY_POSITION){
+        			this.isEmpty = false;
+        		}
+        	}
+        }
+        
     }
 
-    public VersionVC copy() {
-        VersionVC copy = new VersionVC();
-        copy.vectorClock.putAll(this.vectorClock);
-        return copy;
+    public void setEmptyPositions(VersionVC other) throws VersionVCDimensionException{
+    	if(other == null || other.vectorClock==null) {
+            return;
+        }
+        
+        if(this.vectorClock == null){
+        	this.vectorClock = new long[other.vectorClock.length];
+        			
+        	System.arraycopy(other.vectorClock,0, this.vectorClock,0,other.vectorClock.length);
+        }
+        
+        if(this.vectorClock.length!=other.vectorClock.length) throw new VersionVCDimensionException("Error: unable to compare VersionVC objects having different dimension");
+
+        
+        for(int i=0; i<this.vectorClock.length; i++){
+        	if(this.vectorClock[i]==EMPTY_POSITION && other.vectorClock[i]!=EMPTY_POSITION){
+        		this.vectorClock[i]=other.vectorClock[i];
+        		if(this.isEmpty){
+        			this.isEmpty = false;
+        		}
+        	}
+        }
+    }
+    
+    
+    @Override
+    public VersionVC clone() throws CloneNotSupportedException {
+    	VersionVC dolly=(VersionVC) super.clone();
+    	if(this.vectorClock!=null){
+        	dolly.vectorClock=new long[this.vectorClock.length];
+        
+        	System.arraycopy(this.vectorClock,0, dolly.vectorClock,0,this.vectorClock.length);
+    	}	
+        
+        return dolly;
     }
 
-    public VersionVC copy(Set<Integer> pos) {
-        VersionVC copy = new VersionVC();
-        for(Integer p : pos) {
-            if(this.vectorClock.containsKey(p)) {
-                copy.vectorClock.put(p, this.vectorClock.get(p));
-            }
-        }
-        return copy;
+   
+    public VersionVC clone(Set<Integer> pos) throws CloneNotSupportedException{
+    	VersionVC dolly=(VersionVC) super.clone();
+    	if(this.vectorClock!=null){
+    		dolly.vectorClock=new long[this.vectorClock.length];
+    	
+    		for(int i=0; i<this.vectorClock.length; i++){
+    			dolly.vectorClock[i]=EMPTY_POSITION;
+    			dolly.isEmpty = true;
+    		}
+    	
+    		for(Integer p : pos) {
+    			if(p<this.vectorClock.length) {
+    				dolly.vectorClock[p]=this.vectorClock[p];
+    				if(dolly.isEmpty && this.vectorClock[p] != EMPTY_POSITION){
+    					dolly.isEmpty = false;
+    				}
+    			}
+    		}
+    	}	
+        return dolly;
     }
+    
 
     @Override
     public String toString() {
-        return "Version{vc=" + vectorClock + "}";
+    	String res="";
+    	if(this.vectorClock!=null){
+    		for(int i=0; i<this.vectorClock.length; i++){
+    			if(i==this.vectorClock.length-1)
+    				res+=i+"="+this.vectorClock[i];
+    			else
+    				res+=i+"="+this.vectorClock[i]+"; ";
+
+    		}
+    	}
+    	return "Version{vc=" + res + "}";
     }
 
-    public void incrementPositions(Integer... positions) {
-        for(Integer p : positions) {
-            Long value = vectorClock.get(p);
-            if(value != null) {
-                vectorClock.put(p, value + 1);
-            } else {
-                vectorClock.put(p, 1L);
-            }
-        }
+    public void incrementPosition(VersionVCFactory factory, Integer position) throws VersionVCDimensionException{
+    	
+       if(this.vectorClock == null){
+    	   VersionVC newVersion= factory.createVersionVC();
+    	   
+    	   //this.vectorClock=new long[newVersion.vectorClock.length];
+           
+       	   //System.arraycopy(newVersion.vectorClock,0, this.vectorClock,0,newVersion.vectorClock.length);
+    	   
+    	   this.vectorClock = newVersion.vectorClock;
+    	   this.isEmpty = true;
+       }
+        
+       if(position>=this.vectorClock.length) throw new VersionVCDimensionException("Error: unable to put value at position "+position+". VersionVC: "+this);
+
+       if(this.vectorClock[position]==EMPTY_POSITION){
+    	   this.vectorClock[position] = 1L;
+    	   
+       }
+       else{
+    	   this.vectorClock[position]= this.vectorClock[position]+1;
+       }
+    	
+       this.isEmpty = false;
+        
     }
 
     @Override
     public void writeExternal(ObjectOutput objectOutput) throws IOException {
-        if(vectorClock == null || vectorClock.isEmpty()) {
+        if(vectorClock == null) {
             objectOutput.writeInt(0);
+        }else{
+        	
+        	objectOutput.writeInt(this.vectorClock.length);
+        	objectOutput.writeBoolean(this.isEmpty);
+        	for(int i=0; i<this.vectorClock.length; i++){
+        		objectOutput.writeLong(this.vectorClock[i]);
+        	}
         }
-        objectOutput.writeInt(vectorClock.size());
-        for(Map.Entry<Integer, Long> e : vectorClock.entrySet()) {
-            objectOutput.writeInt(e.getKey());
-            objectOutput.writeLong(e.getValue());
-        }
+   
     }
 
     @Override
     public void readExternal(ObjectInput objectInput) throws IOException, ClassNotFoundException {
         int size = objectInput.readInt();
         if(size == 0) {
-            return;
+        	this.vectorClock=null;
+        	this.isEmpty = true;
         }
-
-        if(vectorClock == null) {
-            vectorClock = new HashMap<Integer, Long>();
-        }
-
-        while(size-- > 0) {
-            int k = objectInput.readInt();
-            long v = objectInput.readLong();
-            vectorClock.put(k, v);
+        else{
+        	this.vectorClock=new long[size];
+        	this.isEmpty = objectInput.readBoolean();
+        	for(int i=0; i<size; i++){
+        		this.vectorClock[i]=objectInput.readLong();
+        	}
         }
     }
 
-    /*private void writeObject(ObjectOutputStream out) throws IOException {
-        writeExternal(out);
-    }
-
-    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
-        readExternal(in);
-    }*/
+    
 
     public void clean() {
-        vectorClock.clear();
+        for(int i=0; i<this.vectorClock.length;i++){
+        	this.vectorClock[i]=EMPTY_POSITION;
+        }
+        
+        this.isEmpty = true;
+    }
+    
+    
+    public static VersionVC computeMax(List<VersionVC> versions) throws VersionVCDimensionException{
+    	
+    	
+    	Iterator<VersionVC> itr=versions.iterator();
+    	
+    	VersionVC current;
+    	VersionVC result=null;
+    	boolean first=true;
+    	while(itr.hasNext()){
+    		current=itr.next();
+    		if(first){
+    			result=new VersionVC(current.vectorClock.length);
+    			first=false;
+    		}
+    		
+    		result.setToMaximum(current);
+    		
+    	}
+    	
+    	
+    	
+    	return result;
     }
 }

@@ -11,34 +11,43 @@ import org.infinispan.transaction.xa.GlobalTransaction;
 import org.infinispan.util.Util;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
+import sun.tools.tree.ThisExpression;
 
-import java.util.ArrayList;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.ListIterator;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author pedro
- *         Date: 25-08-2011
+ * @author <a href="mailto:peluso@gsd.inesc-id.pt">Sebastiano Peluso</a>
+ * @since 5.0
  */
 public class CommitQueue {
 
     private final static Log log = LogFactory.getLog(CommitQueue.class);
 
-    private final VersionVC prepareVC;
+    private VersionVC prepareVC;
     private final ArrayList<ListEntry> commitQueue;
     private CommitInstance commitInvocationInstance;
     private InterceptorChain ic;
     private InvocationContextContainer icc;
+    private VersionVCFactory versionVCFactory;
 
-    private boolean trace, debug;
+    private Map<String, String> outOfOrderRollback;
+
+    private boolean trace, debug, info;
 
     public CommitQueue() {
-        prepareVC = new VersionVC();
+        
         commitQueue = new ArrayList<ListEntry>();
+        outOfOrderRollback = new ConcurrentHashMap<String, String>();
     }
+    
+    
+    
+   
 
-    private int searchInsertIndex(VersionVC vc) {
+
+    private int searchInsertIndexPos(VersionVC vc, int pos) {
         if(commitQueue.isEmpty()) {
             return 0;
         }
@@ -47,7 +56,8 @@ public class CommitQueue {
         ListEntry le;
         while(lit.hasNext()) {
             le = lit.next();
-            if(le.commitVC.isAfter(vc)) {
+            if(le.commitVC.isAfterInPosition(vc, pos)){
+            
                 return idx;
             }
             idx++;
@@ -66,7 +76,7 @@ public class CommitQueue {
     //    n (>=0): it is ready to commit and commits the 'n'th following txs
 
     //WARNING: it is assumed that this is called inside a synchronized block!!
-    private int getCommitCode(GlobalTransaction gtx) {
+    private int getCommitCode(GlobalTransaction gtx, int pos) {
         ListEntry toSearch = new ListEntry();
         toSearch.gtx = gtx;
         int idx = commitQueue.indexOf(toSearch);
@@ -89,11 +99,12 @@ public class CommitQueue {
 
         while(idx < queueSize) {
             ListEntry other = commitQueue.get(idx);
-            if(tempCommitVC.isEquals(other.commitVC)) {
+            if(tempCommitVC.equalsInPosition(other.commitVC, pos)){
+            
                 if(!other.ready) {
                     return -2;
                 }
-                tempCommitVC.setToMaximum(other.commitVC);
+                
                 idx++;
             } else {
                 break;
@@ -103,16 +114,23 @@ public class CommitQueue {
         return idx - 1;
     }
 
+   
+    
     @Inject
-    public void inject(InterceptorChain ic, InvocationContextContainer icc) {
+    public void inject(InterceptorChain ic, InvocationContextContainer icc, VersionVCFactory versionVCFactory) {
         this.ic = ic;
         this.icc = icc;
+        this.versionVCFactory=versionVCFactory;
     }
 
-    @Start
+    //AFTER THE VersionVCFactory
+    @Start(priority = 31)
     public void start() {
         trace = log.isTraceEnabled();
         debug = log.isDebugEnabled();
+        info = log.isInfoEnabled();
+        
+        prepareVC = this.versionVCFactory.createEmptyVersionVC();
 
         if(commitInvocationInstance == null) {
             List<CommandInterceptor> all = ic.getInterceptorsWhichExtend(LockingInterceptor.class);
@@ -144,26 +162,56 @@ public class CommitQueue {
      * @param positions the positions to be updated
      * @return the prepare vector clock
      */
-    public VersionVC addTransaction(GlobalTransaction gtx, VersionVC actualVectorClock, InvocationContext ctx, Integer... positions) {
-        synchronized (prepareVC) {
-            prepareVC.setToMaximum(actualVectorClock);
-            prepareVC.incrementPositions(positions);
-            VersionVC prepared = prepareVC.copy();
-            ListEntry le = new ListEntry();
-            le.gtx = gtx;
-            le.commitVC = prepared;
-            le.ctx = ctx;
+    public VersionVC addTransaction(GlobalTransaction gtx, VersionVC actualVectorClock, InvocationContext ctx) {
 
-            synchronized (commitQueue) {
-                int idx = searchInsertIndex(prepared);
-                if(debug) {
-                    log.debugf("Adding transaction %s [%s] to queue in position %s. queue state is %s",
-                            Util.prettyPrintGlobalTransaction(gtx), prepared, idx, commitQueue.toString());
+        String stringTx = Util.prettyPrintGlobalTransaction(gtx);
+
+
+        synchronized (prepareVC) {
+            try{
+
+                prepareVC.setToMaximum(actualVectorClock);
+                prepareVC.incrementPosition(this.versionVCFactory, this.versionVCFactory.getMyIndex());
+
+
+                VersionVC prepared = prepareVC.clone();
+                ListEntry le = new ListEntry();
+                le.gtx = gtx;
+                le.commitVC = prepared;
+                le.ctx = ctx;
+
+                synchronized (commitQueue) {
+
+
+
+
+                    int idx = searchInsertIndexPos(prepared, this.versionVCFactory.getMyIndex());
+
+                    //log.infof("Adding transaction %s [%s] to queue in position %s. queue state is %s", Util.prettyPrintGlobalTransaction(gtx), prepared, idx, commitQueue.toString());
+
+                    commitQueue.add(idx, le);
+                    //commitQueue.notifyAll();
+
+
+
+
+
                 }
-                commitQueue.add(idx, le);
-                commitQueue.notifyAll();
+                return prepared;
             }
-            return prepared;
+            catch(CloneNotSupportedException e){
+                e.printStackTrace();
+                return null;
+            }
+        }
+    }
+
+
+    public void updateOnlyPrepareVC(VersionVC commitVC){
+
+        synchronized (prepareVC){
+            prepareVC.setToMaximum(commitVC);
+
         }
     }
 
@@ -189,6 +237,9 @@ public class CommitQueue {
         }
         List<ListEntry> toCommit = new LinkedList<ListEntry>();
 
+        
+        int commitCode=-1;
+        
         synchronized (commitQueue) {
             ListEntry toSearch = new ListEntry();
             toSearch.gtx = gtx;
@@ -202,14 +253,14 @@ public class CommitQueue {
             ListEntry le = commitQueue.get(idx);
             commitQueue.remove(idx);
             le.commitVC = commitVC;
-            idx = searchInsertIndex(commitVC);
+            idx = searchInsertIndexPos(commitVC, this.versionVCFactory.getMyIndex());
             commitQueue.add(idx, le);
 
             commitQueue.get(0).headStartTs = System.nanoTime();
 
 
-            if(debug) {
-                log.debugf("Update transaction %s position in queue. Final index is %s and commit version is %s",
+            if(info){
+                log.infof("Update transaction %s position in queue. Final index is %s and commit version is %s",
                         Util.prettyPrintGlobalTransaction(gtx),
                         idx, commitVC);
             }
@@ -219,36 +270,41 @@ public class CommitQueue {
 
             while(true) {
 
-                int commitCode = getCommitCode(gtx);
+                commitCode = getCommitCode(gtx, this.versionVCFactory.getMyIndex());
 
                 if(commitCode == -2) { //it is not it turn
                     commitQueue.wait();
                     continue;
                 } else if(commitCode == -1) { //already committed
-                    if(commitQueue.remove(le)) {
-                        commitQueue.notifyAll();
-                    }
+                    commitQueue.remove(le); //We don't really need this line
+                    commitQueue.notifyAll();
+                    
                     return;
                 }
 
                 if(le.headStartTs != 0) {
-                    log.warnf("Transaction %s has %s nano seconds in the head of the queue",
+                	if(info){
+                    log.infof("Transaction %s has %s nano seconds in the head of the queue",
                             Util.prettyPrintGlobalTransaction(gtx), System.nanoTime() - le.headStartTs);
+                	}
                 }
 
                 if(commitCode >= commitQueue.size()) {
-                    log.warnf("The commit code received is higher than the size of commit queue (%s > %s)",
+                	if(info){
+                		log.infof("The commit code received is higher than the size of commit queue (%s > %s)",
                             commitCode, commitQueue.size());
+                	}
                     commitCode = commitQueue.size() - 1;
                 }
 
                 toCommit.addAll(commitQueue.subList(0, commitCode + 1));
                 break;
             }
-            if(debug) {
-                log.debugf("Transaction %s will apply it write set now. Queue state is %s",
+            if(info){
+            log.infof("Transaction %s will apply it write set now. Queue state is %s",
                         Util.prettyPrintGlobalTransaction(le.gtx), commitQueue.toString());
             }
+            
         }
 
         if(debug) {
@@ -265,8 +321,24 @@ public class CommitQueue {
             committedTxVersionVC.add(le.commitVC);
         }
         icc.resume(thisCtx);
+        
+        if(log.isDebugEnabled() && commitCode>=1){
+        	String listVC="";
+        	VersionVC current;
+        	Iterator<VersionVC> itr=committedTxVersionVC.iterator(); 
+        	while(itr.hasNext()){
+        		current=itr.next();
+        		listVC+=" "+current;
+        	}
+        	if(debug){
+        		log.debug("Batching: "+listVC);
+        	}	
+        }
+        
+        VersionVC maxCommittedVC=VersionVC.computeMax(committedTxVersionVC);
 
-        commitInvocationInstance.addTransaction(committedTxVersionVC);
+        //Insert only one entry in the commitLog. This is the maximum vector clock.
+        commitInvocationInstance.addTransaction(maxCommittedVC);
 
         synchronized (commitQueue) {
             if(commitQueue.removeAll(toCommit)) {
@@ -283,16 +355,30 @@ public class CommitQueue {
      * @param gtx the transaction identifier
      */
     @SuppressWarnings({"SuspiciousMethodCalls"})
-    public void remove(GlobalTransaction gtx) {
+    public void remove(GlobalTransaction gtx, boolean commit) {
         ListEntry toSearch = new ListEntry();
         toSearch.gtx = gtx;
+
+        String stringTx = Util.prettyPrintGlobalTransaction(gtx);
         synchronized (commitQueue) {
             if(trace) {
                 log.tracef("Remove transaction %s from queue. Queue is %s",
-                        Util.prettyPrintGlobalTransaction(gtx), commitQueue.toString());
+                        stringTx, commitQueue.toString());
             }
             if(commitQueue.remove(toSearch)) {
+
                 commitQueue.notifyAll();
+
+
+            }
+            else if(!commit){
+                //This transaction is not inserted in the queue. This means that this transaction has only read on this node
+                //This is not an out of order rollback since we solve this problem in RollbackCommand and PrepareCommand classes.
+                //log.warnf("We have a warning here. Removing transaction %s from queue does not succeed.",stringTx);
+
+
+
+
             }
         }
     }
@@ -319,6 +405,10 @@ public class CommitQueue {
             commitQueue.notifyAll();
         }
     }
+
+
+
+
 
     private static class ListEntry {
         private GlobalTransaction gtx;
@@ -356,6 +446,6 @@ public class CommitQueue {
     public static interface CommitInstance {
         void commit(InvocationContext ctx, VersionVC commitVersion);
         void addTransaction(VersionVC commitVC);
-        void addTransaction(List<VersionVC> commitVC);
+        //void addTransaction(List<VersionVC> commitVC);
     }
 }

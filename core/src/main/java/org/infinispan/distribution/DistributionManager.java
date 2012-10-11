@@ -37,6 +37,7 @@ import org.infinispan.remoting.transport.Address;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * A component that manages the distribution of elements across a cache cluster
@@ -170,6 +171,9 @@ public interface DistributionManager {
      * @return a list of addresses which represent a combined set of all addresses affected by the set of keys.
      */
     List<Address> getAffectedNodes(Collection<Object> affectedKeys);
+    
+    
+    
 
     /**
      * Applies an ordered list of modifications to the current node.  Typically used when state is pushed to the node
@@ -195,5 +199,9 @@ public interface DistributionManager {
     int getAddressID(Address addr);
 
     int getSelfID();
+    
+    Set<Integer> locateGroupIds();
+    
+    List<Address> getAffectedNodesAndOwners(Collection<Object> affectedKeysForNodes, Collection<Object> affectedKeysForOwners);
 }
 

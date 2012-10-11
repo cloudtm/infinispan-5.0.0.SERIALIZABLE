@@ -26,6 +26,7 @@ import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.transaction.AbstractCacheTransaction;
 import org.infinispan.transaction.LocalTransaction;
@@ -35,6 +36,8 @@ import org.infinispan.util.BidirectionalMap;
 import javax.transaction.Status;
 import javax.transaction.SystemException;
 import javax.transaction.Transaction;
+
+import java.util.BitSet;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +53,7 @@ import java.util.Set;
 public class LocalTxInvocationContext extends AbstractTxInvocationContext {
 
     private LocalTransaction localTransaction;
+    
 
     public boolean isTransactionValid() {
         Transaction t = getTransaction();
@@ -109,6 +113,14 @@ public class LocalTxInvocationContext extends AbstractTxInvocationContext {
     public void clearLookedUpEntries() {
         localTransaction.clearLookedUpEntries();
     }
+    
+    public Object[] getLocalReadSet(){
+    	return this.localTransaction.getLocalReadSet();
+    }
+    
+    public Object[] getRemoteReadSet(){
+    	return this.localTransaction.getRemoteReadSet();
+    }
 
     @Override
     public boolean hasLockedKey(Object key) {
@@ -130,8 +142,8 @@ public class LocalTxInvocationContext extends AbstractTxInvocationContext {
 
     //version state
     @Override
-    public VersionVC calculateVersionToRead() {
-        return localTransaction.calculateVectorClockToRead();
+    public VersionVC calculateVersionToRead(VersionVCFactory versionVCFactory) {
+        return localTransaction.calculateVectorClockToRead(versionVCFactory);
     }
 
     @Override
@@ -145,32 +157,102 @@ public class LocalTxInvocationContext extends AbstractTxInvocationContext {
     }
 
     @Override
-    public long getVectorClockValueIn(int idx) {
-        return localTransaction.getValueFrom(idx);
+    public long getVectorClockValueIn(VersionVCFactory versionVCFactory, int idx) {
+        return localTransaction.getValueFrom(versionVCFactory, idx);
+    }
+    @Override
+    public void setVectorClockValueIn(VersionVCFactory versionVCFactory, int pos, long value){
+    	 localTransaction.setVectorClockValueIn(versionVCFactory, pos, value);
+    }
+    
+    
+    public VersionVC getMinVersion() {
+        return localTransaction.getMinVersion();
     }
 
     @Override
-    public VersionVC getMinVersion(Set<Integer> toReadFrom) {
-        return localTransaction.getMinVersion(toReadFrom);
+    public void addLocalReadKey(Object key, InternalMVCCEntry ime) {
+        localTransaction.addLocalReadKey(key, ime);
     }
-
+    
     @Override
-    public void addReadKey(Object key, InternalMVCCEntry ime) {
-        localTransaction.addReadKey(key, ime);
+    public void removeLocalReadKey(Object key) {
+        localTransaction.removeLocalReadKey(key);
+    }
+    
+    
+    @Override
+    public void removeRemoteReadKey(Object key) {
+        localTransaction.removeRemoteReadKey(key);
+    }
+    
+    
+    @Override
+    public void addRemoteReadKey(Object key, InternalMVCCEntry ime) {
+        localTransaction.addRemoteReadKey(key, ime);
     }
 
     @Override
     public void markReadFrom(int idx) {
         localTransaction.setAlreadyRead(idx);
     }
+    
+    
+    
+    @Override
+    public BitSet getReadFrom(){
+    	return (localTransaction == null)?null:localTransaction.getAlreadyRead();
+    }
+    
+    @Override
+    public void setAlreadyReadOnNode(boolean alreadyRead){
+    	this.localTransaction.setAlreadyReadOnNode(alreadyRead);
+    }
+    
+    @Override
+    public boolean getAlreadyReadOnNode(){
+    	return this.localTransaction.getAlreadyReadOnNode();
+    }
 
     @Override
-    public InternalMVCCEntry getReadKey(Object Key) {
-        return localTransaction.getReadKey(Key);
+    public InternalMVCCEntry getLocalReadKey(Object Key) {
+        return localTransaction.getLocalReadKey(Key);
+    }
+    
+    @Override
+    public InternalMVCCEntry getRemoteReadKey(Object Key) {
+        return localTransaction.getRemoteReadKey(Key);
     }
 
     @Override
     public void setCommitVersion(VersionVC version) {
         localTransaction.setCommitVersion(version);
+    }
+    
+    @Override
+    public void setLastReadKey(CacheEntry entry){
+    	localTransaction.setLastReadKey(entry);
+    	
+    }
+    
+    @Override
+    public CacheEntry getLastReadKey(){
+    	return localTransaction.getLastReadKey();
+    	
+    }
+    
+    @Override
+    public void clearLastReadKey(){
+    	localTransaction.clearLastReadKey();
+    }
+
+    //Sebastiano
+    public void markLocallyValidated(){
+        localTransaction.markLocallyValidated();
+    }
+
+    //Sebastiano
+    public boolean isLocallyValidated(){
+        return localTransaction.isLocallyValidated();
     }
 }

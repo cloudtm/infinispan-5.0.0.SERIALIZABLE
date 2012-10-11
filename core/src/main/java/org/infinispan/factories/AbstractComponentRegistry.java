@@ -179,6 +179,7 @@ public abstract class AbstractComponentRegistry implements Lifecycle, Cloneable 
         s.add(RecoveryManagerFactory.class);
         s.add(TransactionTableFactory.class);
         s.add(TotalOrderTxManFactory.class);
+        s.add(VersionVCFactoryFactory.class);
         return s;
     }
 

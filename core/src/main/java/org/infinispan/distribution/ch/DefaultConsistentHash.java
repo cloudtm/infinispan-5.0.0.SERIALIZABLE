@@ -45,7 +45,18 @@ public class DefaultConsistentHash extends AbstractWheelConsistentHash {
     }
 
     public List<Address> locate(Object key, int replCount) {
-        int hash = getNormalizedHash(getGrouping(key));
+    	
+    	int hash;
+    	
+    	//Sebastiano
+    	if(bypassHashing(key)){
+    		hash = getAssociatedHash(key);
+    	}
+    	else{
+    	
+    		hash = getNormalizedHash(getGrouping(key));
+    		
+    	}	
         int numCopiesToFind = getNumCopiesToFind(replCount);
 
         List<Address> owners = new ArrayList<Address>(numCopiesToFind);
@@ -76,10 +87,61 @@ public class DefaultConsistentHash extends AbstractWheelConsistentHash {
 
         return owners;
     }
+    
+    
+    
+    //Sebastiano
+    private boolean bypassHashing(Object key){
+    	
+    	return key instanceof StaticGroupSlice;
+    }
+    
+    //Sebastiano
+    private int getAssociatedHash(Object key){
+    	
+    	int slice = ((StaticGroupSlice)key).getSlice();
+    	
+    	Set<Integer> nodesIndexes = this.positions.keySet();
+    	
+    	int numIndexes = nodesIndexes.size();
+    	
+    	
+    	Iterator<Integer> itr = nodesIndexes.iterator();
+    	
+    	boolean found=false;
+    	Integer current = null;
+    	int currentPos= 0;
+    	while(itr.hasNext()){
+    		current=itr.next();
+    		
+    		if(currentPos == (slice % numIndexes)){
+    			found=true;
+    			break;
+    		}
+    		
+    		currentPos++;
+    	}
+    	
+    	if(!found){
+    		return this.positions.firstKey();
+    	}
+    	else{
+    		return current;
+    	}
+    }
 
     @Override
     public boolean isKeyLocalToAddress(Address target, Object key, int replCount) {
-        int hash = getNormalizedHash(getGrouping(key));
+    	int hash;
+    	//Sebastiano
+    	if(bypassHashing(key)){
+    		hash = getAssociatedHash(key);
+    	}
+    	else{
+    	
+    		hash = getNormalizedHash(getGrouping(key));
+    		
+    	}	
         int numCopiesToFind = getNumCopiesToFind(replCount);
 
         SortedMap<Integer, Address> candidates = positions.tailMap(hash);

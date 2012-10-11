@@ -25,9 +25,12 @@ package org.infinispan.context.impl;
 import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.transaction.xa.GlobalTransaction;
 
 import javax.transaction.Transaction;
+
+import java.util.BitSet;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
@@ -83,12 +86,18 @@ public interface TxInvocationContext extends InvocationContext {
 
     //Pedro: new interface
     void markReadFrom(int idx);
+    
+    BitSet getReadFrom();
 
     void updateVectorClock(VersionVC other);
 
-    long getVectorClockValueIn(int idx);
+    long getVectorClockValueIn(VersionVCFactory versionVCFactory, int idx);
+    
+    void setVectorClockValueIn(VersionVCFactory versionVCFactory, int pos, long value);
 
-    VersionVC getMinVersion(Set<Integer> toReadFrom);
+    VersionVC getMinVersion();
 
     void setCommitVersion(VersionVC version);
+    
+    
 }

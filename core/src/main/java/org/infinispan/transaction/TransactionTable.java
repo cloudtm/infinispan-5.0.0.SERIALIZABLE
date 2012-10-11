@@ -36,6 +36,7 @@ import org.infinispan.factories.annotations.Stop;
 import org.infinispan.interceptors.InterceptorChain;
 import org.infinispan.manager.EmbeddedCacheManager;
 import org.infinispan.mvcc.CommitLog;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.notifications.Listener;
 import org.infinispan.notifications.cachelistener.CacheNotifier;
 import org.infinispan.notifications.cachelistener.annotation.TopologyChanged;
@@ -76,6 +77,9 @@ public class TransactionTable {
 
     protected final ConcurrentMap<GlobalTransaction, RemoteTransaction> remoteTransactions = new ConcurrentHashMap<GlobalTransaction, RemoteTransaction>();
 
+    //Sebastiano
+    protected final ConcurrentMap<GlobalTransaction, String> outOfOrderRollbacks = new ConcurrentHashMap<GlobalTransaction, String>();
+
 
     private final Object listener = new StaleTransactionCleanup();
 
@@ -92,13 +96,16 @@ public class TransactionTable {
 
     //Pedro: added the commit log to set the initial vector clock of transactions
     protected CommitLog commitLog;
+    
+    //added by Sebastiano
+    private VersionVCFactory versionVCFactory;
 
     @Inject
     public void initialize(RpcManager rpcManager, Configuration configuration,
                            InvocationContextContainer icc, InterceptorChain invoker, CacheNotifier notifier,
                            TransactionFactory gtf, EmbeddedCacheManager cm, TransactionCoordinator txCoordinator,
                            TransactionSynchronizationRegistry transactionSynchronizationRegistry,
-                           CommitLog commitLog) {
+                           CommitLog commitLog, VersionVCFactory versionVCFactory) {
         this.rpcManager = rpcManager;
         this.configuration = configuration;
         this.icc = icc;
@@ -109,6 +116,7 @@ public class TransactionTable {
         this.txCoordinator = txCoordinator;
         this.transactionSynchronizationRegistry = transactionSynchronizationRegistry;
         this.commitLog = commitLog;
+        this.versionVCFactory=versionVCFactory;
     }
 
     @Start
@@ -186,7 +194,7 @@ public class TransactionTable {
                 }
             }
             //init the transaction vector clock. it is only used for Serializability
-            localTransaction.initVectorClock(commitLog.getActualVersion());
+            localTransaction.initVectorClock(this.versionVCFactory, commitLog.getActualVersion());
             ((SyncLocalTransaction) localTransaction).setEnlisted(true);
         }
     }
@@ -202,6 +210,7 @@ public class TransactionTable {
     public boolean containsLocalTx(Transaction tx) {
         return tx != null && localTransactions.containsKey(tx);
     }
+
 
     @Listener
     public class StaleTransactionCleanup {
@@ -323,6 +332,32 @@ public class TransactionTable {
         return remoteTransactions.get(txId);
     }
 
+
+    //Sebastiano
+    public void setOutOfOrderRollback(GlobalTransaction txId){
+
+        //This transaction is not Prepared. Mark it as an out of order rollback
+        this.outOfOrderRollbacks.put(txId, "out");  //The value doesn't matter. It should be different from null. I prefer a map because I can use its concurrent implementation.
+
+
+
+    }
+
+    //Sebastiano
+    public boolean removeOutOfOrderRollback(GlobalTransaction txId){
+
+        String value = this.outOfOrderRollbacks.remove(txId);
+
+        return value != null;
+    }
+
+    //Sebastiano
+    public boolean isOutOfOrderRollback(GlobalTransaction globalTx) {
+
+        return this.outOfOrderRollbacks.get(globalTx) != null;
+    }
+
+
     /**
      * Creates and register a {@link RemoteTransaction} based on the supplied params.
      * Returns the created transaction.
@@ -393,7 +428,7 @@ public class TransactionTable {
         if (log.isTraceEnabled()) log.tracef("Removing remote transaction as it is completed: %s", remove);
     }
 
-    private boolean removeRemoteTransaction(GlobalTransaction txId) {
+    public boolean removeRemoteTransaction(GlobalTransaction txId) {
         boolean existed = remoteTransactions.remove(txId) != null;
         if (trace) {
             log.tracef("Removed %s from transaction table. Transaction existed? %b", txId, existed);

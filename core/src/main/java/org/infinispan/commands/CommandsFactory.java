@@ -341,6 +341,10 @@ public interface CommandsFactory {
                                                                      Set<Object> writeSet, VersionVC version);
 
     PrepareCommand buildPrepareCommand(GlobalTransaction gtx, List<WriteCommand> modifications,
-                                              Set<Object> readSet, VersionVC version,
+                                             Object[] readSet, VersionVC version,
+                                              boolean onePhaseCommit);
+
+    TotalOrderPrepareCommand buildTotalOrderPrepareCommand(GlobalTransaction gtx, List<WriteCommand> modifications,
+                                              Object[] readSet, VersionVC version,
                                               boolean onePhaseCommit);
 }

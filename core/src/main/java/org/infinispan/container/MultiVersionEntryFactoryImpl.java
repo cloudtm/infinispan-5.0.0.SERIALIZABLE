@@ -4,27 +4,32 @@ import org.infinispan.config.Configuration;
 import org.infinispan.container.entries.*;
 import org.infinispan.context.Flag;
 import org.infinispan.context.InvocationContext;
+import org.infinispan.container.key.ContextAwareKey;
 import org.infinispan.factories.annotations.Inject;
 import org.infinispan.marshall.MarshalledValue;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.notifications.cachelistener.CacheNotifier;
 import org.infinispan.util.Util;
 import org.infinispan.util.concurrent.TimeoutException;
+import org.infinispan.util.concurrent.locks.LockManager;
 import org.infinispan.util.concurrent.locks.readwritelock.ReadWriteLockManager;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
 
 /**
  * @author pruivo
- * Date: 10/08/11
+ * @author <a href="mailto:peluso@gsd.inesc-id.pt">Sebastiano Peluso</a>
+ * @since 5.0
  */
 public class MultiVersionEntryFactoryImpl implements EntryFactory {
 
     private DataContainer container;
-    private ReadWriteLockManager lockManager;
+    private LockManager lockManager;
     private Configuration configuration;
     private CacheNotifier notifier;
+    private VersionVCFactory versionVCFactory;
 
     private static final Log log = LogFactory.getLog(EntryFactoryImpl.class);
     private static final boolean trace = log.isTraceEnabled();
@@ -115,12 +120,13 @@ public class MultiVersionEntryFactoryImpl implements EntryFactory {
     }
 
     @Inject
-    public void injectDependencies(DataContainer dataContainer, ReadWriteLockManager lockManager,
-                                   Configuration configuration, CacheNotifier notifier) {
+    public void injectDependencies(DataContainer dataContainer, LockManager lockManager,
+                                   Configuration configuration, CacheNotifier notifier, VersionVCFactory versionVCFactory) {
         this.container = dataContainer;
         this.configuration = configuration;
         this.lockManager = lockManager;
         this.notifier = notifier;
+        this.versionVCFactory = versionVCFactory;
     }
 
     @Override
@@ -141,7 +147,7 @@ public class MultiVersionEntryFactoryImpl implements EntryFactory {
                     key = ((MarshalledValue) key).get();
                 }
                 throw new TimeoutException("Unable to acquire lock after [" +
-                        Util.prettyPrintTime(lockManager.getLockAcquisitionTimeout(ctx)) + "] on key [" + key +
+                        Util.prettyPrintTime(((ReadWriteLockManager)lockManager).getLockAcquisitionTimeout(ctx)) + "] on key [" + key +
                         "] for requestor [" + ctx.getLockOwner() + "]! Lock held by [" + owner + "]");
             }
         } else {
@@ -176,38 +182,51 @@ public class MultiVersionEntryFactoryImpl implements EntryFactory {
     @Override
     public CacheEntry wrapEntryForReading(InvocationContext ctx, Object key) throws InterruptedException {
         CacheEntry cacheEntry;
-        if ((cacheEntry = ctx.lookupEntry(key)) == null) {
+        
+        ctx.clearLastReadKey();//Clear last read key field;
+        
+        //Is this key already written? (We don't have in lookup table a key previously read)
+        if ((cacheEntry = ctx.lookupEntry(key)) == null) {//NO
             if (trace) {
                 log.tracef("Key %s is not in context, fetching from container.", key);
             }
 
             if (ctx.isInTxScope() || ctx.readBasedOnVersion()) {
 
-                VersionVC maxToRead = ctx.calculateVersionToRead();
+                VersionVC maxToRead = ctx.calculateVersionToRead(this.versionVCFactory);
+                
+                boolean hasAlreadyReadFromThisNode = ctx.getAlreadyReadOnNode();
 
-                InternalMVCCEntry ime = container.get(key, maxToRead);
+                ((ReadWriteLockManager) lockManager).addRegisterReadSample(0);//This is only to make fair the comparison with the SOCS algorithm
+
+
+                InternalMVCCEntry ime = container.get(key, maxToRead, !hasAlreadyReadFromThisNode);
                 cacheEntry = ime.getValue();
 
                 MVCCEntry mvccEntry = cacheEntry == null ?
                         createWrappedEntry(key, null, false, false, -1) :
                         createWrappedEntry(key, cacheEntry.getValue(), false, false, cacheEntry.getLifespan());
                 if (mvccEntry != null) {
-                    ctx.addReadKey(key,ime);
-                    ctx.putLookedUpEntry(key, mvccEntry);
+                	
+                	ctx.addLocalReadKey(key,ime); //Add to the readSet
+                		
+                    
+                    ctx.setLastReadKey(mvccEntry); //Remember the last read key
                 }
 
                 return mvccEntry;
             } else {
                 cacheEntry = container.get(key);
                 if(cacheEntry != null) {
-                    ctx.putLookedUpEntry(key, cacheEntry);
+                	ctx.setLastReadKey(cacheEntry);
                 }
                 return cacheEntry;
             }
-        } else {
+        } else {//Yes
             if (trace) {
                 log.trace("Key is already in context");
             }
+            ctx.setLastReadKey(cacheEntry);
             return cacheEntry;
         }
     }

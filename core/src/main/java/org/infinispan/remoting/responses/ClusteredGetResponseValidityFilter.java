@@ -36,25 +36,36 @@ import java.util.HashSet;
  */
 public class ClusteredGetResponseValidityFilter implements ResponseFilter {
 
-   private int numValidResponses = 0;
+    private int numValidResponses = 0;
 
-   private Collection<Address> pendingResponders;
+    private Collection<Address> pendingResponders;
+    private boolean serializability;
 
-   public ClusteredGetResponseValidityFilter(Collection<Address> pendingResponders) {
-      this.pendingResponders = new HashSet<Address>(pendingResponders);
-   }
+    public ClusteredGetResponseValidityFilter(Collection<Address> pendingResponders) {
+        this.pendingResponders = new HashSet<Address>(pendingResponders);
+    }
 
-   public boolean isAcceptable(Response response, Address address) {
-      pendingResponders.remove(address);
+    public ClusteredGetResponseValidityFilter(Collection<Address> pendingResponders,
+                                              boolean serializability) {
+        this.pendingResponders = new HashSet<Address>(pendingResponders);
+        this.serializability = serializability;
+    }
 
-      if (response instanceof SuccessfulResponse) numValidResponses++;
+    public boolean isAcceptable(Response response, Address address) {
+        pendingResponders.remove(address);
 
-      // always return true to make sure a response is logged by the JGroups RpcDispatcher.
-      return true;
-   }
+        if(response == null && serializability) {
+            return true;
+        }
 
-   public boolean needMoreResponses() {
-      return numValidResponses < 1 && !pendingResponders.isEmpty();
-   }
+        if (response instanceof SuccessfulResponse) numValidResponses++;
+
+        // always return true to make sure a response is logged by the JGroups RpcDispatcher.
+        return true;
+    }
+
+    public boolean needMoreResponses() {
+        return numValidResponses < 1 && !pendingResponders.isEmpty();
+    }
 
 }

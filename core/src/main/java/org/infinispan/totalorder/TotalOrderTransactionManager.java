@@ -216,9 +216,10 @@ public class TotalOrderTransactionManager {
         remoteTxs.remove(gtx);
     }
 
-    public void createRemoteTxAndSetStartTime(GlobalTransaction gtx) {
+    public RemoteTxInformation createRemoteTxAndSetStartTime(GlobalTransaction gtx) {
         RemoteTxInformation remoteTx = createRemoteTxIfAbsent(gtx);
         remoteTx.setStart(System.nanoTime());
+        return remoteTx;
     }
 
     public static class RemoteTxInformation {

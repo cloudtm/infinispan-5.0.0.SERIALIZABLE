@@ -92,7 +92,9 @@ public class InterceptorChainFactory extends AbstractNamedCacheComponentFactory 
             interceptorChain.appendInterceptor(createInterceptor(InvocationContextInterceptor.class));
 
         if(configuration.isTotalOrderReplication()) {
-            if(configuration.getCacheMode().isReplicated()) {
+            if(serializability) {
+                interceptorChain.appendInterceptor(createInterceptor(SerialTotalOrderInterceptor.class));
+            } else if(configuration.getCacheMode().isReplicated()) {
                 interceptorChain.appendInterceptor(createInterceptor(TotalOrderInterceptor.class));
             } else {
                 interceptorChain.appendInterceptor(createInterceptor(DistTotalOrderInterceptor.class));

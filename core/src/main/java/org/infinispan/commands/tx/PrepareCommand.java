@@ -28,17 +28,22 @@ import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.context.impl.RemoteTxInvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
+import org.infinispan.mvcc.CommitQueue;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.notifications.cachelistener.CacheNotifier;
 import org.infinispan.transaction.RemoteTransaction;
 import org.infinispan.transaction.xa.GlobalTransaction;
 import org.infinispan.transaction.xa.recovery.RecoveryManager;
+import org.infinispan.util.Util;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
+import sun.tools.tree.ThisExpression;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 
@@ -60,15 +65,19 @@ public class PrepareCommand extends AbstractTransactionBoundaryCommand {
     protected boolean onePhaseCommit;
     protected CacheNotifier notifier;
     protected RecoveryManager recoveryManager;
-    protected Set<Object> readSet;
+    protected Object[] readSet;
     protected VersionVC version;
+    //We don't want to serialize this factory
+    protected transient VersionVCFactory versionVCFactory;
 
-    public void initialize(CacheNotifier notifier, RecoveryManager recoveryManager) {
+
+    public void initialize(CacheNotifier notifier, RecoveryManager recoveryManager, VersionVCFactory versionVCFactory) {
         this.notifier = notifier;
         this.recoveryManager = recoveryManager;
+        this.versionVCFactory=versionVCFactory;
     }
 
-    public PrepareCommand(GlobalTransaction gtx, boolean onePhaseCommit, Set<Object> readSet, VersionVC version,  List<WriteCommand> commands) {
+    public PrepareCommand(GlobalTransaction gtx, boolean onePhaseCommit, Object[] readSet, VersionVC version,  List<WriteCommand> commands) {
         this.globalTx = gtx;
         this.modifications = commands == null || commands.isEmpty() ? null : commands.toArray(new WriteCommand[commands.size()]);
         this.onePhaseCommit = onePhaseCommit;
@@ -81,7 +90,7 @@ public class PrepareCommand extends AbstractTransactionBoundaryCommand {
         this.modifications = modifications;
         this.onePhaseCommit = onePhaseCommit;
         this.readSet = null;
-        this.version = VersionVC.EMPTY_VERSION;
+        this.version = null;
     }
 
     public PrepareCommand(GlobalTransaction gtx, List<WriteCommand> commands, boolean onePhaseCommit) {
@@ -89,13 +98,16 @@ public class PrepareCommand extends AbstractTransactionBoundaryCommand {
         this.modifications = commands == null || commands.isEmpty() ? null : commands.toArray(new WriteCommand[commands.size()]);
         this.onePhaseCommit = onePhaseCommit;
         this.readSet = null;
-        this.version = VersionVC.EMPTY_VERSION;
+        this.version = null;
     }
 
     public PrepareCommand() {
     }
 
     public Object perform(InvocationContext ignored) throws Throwable {
+
+        //log.warnf("Received Prepare for Transaction %s", Util.prettyPrintGlobalTransaction(globalTx));
+
         if (ignored != null)
             throw new IllegalStateException("Expected null context!");
 
@@ -104,11 +116,21 @@ public class PrepareCommand extends AbstractTransactionBoundaryCommand {
             return null;
         }
 
+        //log.warnf("Received Prepare for Transaction %s", Util.prettyPrintGlobalTransaction(globalTx));
+
+        RemoteTransaction remoteTransaction = null;
+        try{
         // 1. first create a remote transaction
-        RemoteTransaction remoteTransaction = txTable.getRemoteTransaction(globalTx);
+        remoteTransaction = txTable.getRemoteTransaction(globalTx);
         boolean remoteTxInitiated = remoteTransaction != null;
+
+        boolean removeOnOutOfOrderRollback = false;
+
         if (!remoteTxInitiated) {
             remoteTransaction = txTable.createRemoteTransaction(globalTx, modifications);
+
+            removeOnOutOfOrderRollback = true;
+
         } else {
             /*
             * remote tx was already created by Cache#lock() API call
@@ -120,6 +142,30 @@ public class PrepareCommand extends AbstractTransactionBoundaryCommand {
             remoteTransaction.setModifications(getModifications());
         }
 
+
+
+
+        //Now I check if a rollback for this transaction is already arrived. That was an out of order rollback.
+        //This happens when fifo is not guaranteed (because we can use JGroups OOB threads) and the coordinator for this transaction
+        //sends the rollback to this node before waiting for the ack for a prepare on this node (e.g. replication timeout exception).
+
+        boolean toBeRemoved = txTable.isOutOfOrderRollback(globalTx);
+
+        if(toBeRemoved){//The rollback has already touched this node because an out of order rollback was registered in the txTable
+
+            log.warnf("Rollback is already arrived for transaction %s", Util.prettyPrintGlobalTransaction(globalTx));
+
+            txTable.removeOutOfOrderRollback(globalTx); //We want to be sure that this entry is removed.
+
+            if(removeOnOutOfOrderRollback){//This command had created the remote transaction.
+               txTable.removeRemoteTransaction(globalTx); //Garbage collects this remote transaction because the rollback is already arrived.
+            }
+
+            return null; //The coordinator doesn't really wait for this response because it has already sent the rollback.
+
+        }
+
+
         // 2. then set it on the invocation context
         RemoteTxInvocationContext ctx = icc.createRemoteTxInvocationContext(getOrigin());
         ctx.setRemoteTransaction(remoteTransaction);
@@ -128,6 +174,13 @@ public class PrepareCommand extends AbstractTransactionBoundaryCommand {
             log.tracef("Invoking remotely originated prepare: %s with invocation context: %s", this, ctx);
         notifier.notifyTransactionRegistered(ctx.getGlobalTransaction(), ctx);
         return invoker.invoke(ctx, this);
+        }
+        finally{
+            if(remoteTransaction != null){
+                //Suppose a rollback concurrently arrives. It can execute only after the completion of this prepare.
+                remoteTransaction.notifyEndPrepare();
+            }
+        }
     }
 
     public Object acceptVisitor(InvocationContext ctx, Visitor visitor) throws Throwable {
@@ -157,14 +210,16 @@ public class PrepareCommand extends AbstractTransactionBoundaryCommand {
     @Override
     public Object[] getParameters() {
         int numMods = modifications == null ? 0 : modifications.length;
-        Object[] retval = new Object[numMods + 6];
+        int numReads = readSet == null ? 0 : readSet.length;
+        Object[] retval = new Object[numMods + numReads + 6];
         retval[0] = globalTx;
         retval[1] = cacheName;
         retval[2] = onePhaseCommit;
-        retval[3] = readSet;
-        retval[4] = version;
-        retval[5] = numMods;
+        retval[3] = version;
+        retval[4] = numMods;
+        retval[5] = numReads;
         if (numMods > 0) System.arraycopy(modifications, 0, retval, 6, numMods);
+        if (numReads > 0) System.arraycopy(readSet, 0, retval, 6 + numMods, numReads);
         return retval;
     }
 
@@ -174,13 +229,17 @@ public class PrepareCommand extends AbstractTransactionBoundaryCommand {
         globalTx = (GlobalTransaction) args[0];
         cacheName = (String) args[1];
         onePhaseCommit = (Boolean) args[2];
-        readSet = (Set<Object>) args[3];
-        version = (VersionVC) args[4];
-        int numMods = (Integer) args[5];
+        version = (VersionVC) args[3];
+        int numMods = (Integer) args[4];
+        int numReads = (Integer) args[5];
         if (numMods > 0) {
             modifications = new WriteCommand[numMods];
             System.arraycopy(args, 6, modifications, 0, numMods);
         }
+        if(numReads > 0){
+        	readSet = new Object[numReads];
+        	System.arraycopy(args, 6 + numMods, readSet, 0, numReads);
+        }	
     }
 
     public PrepareCommand copy() {
@@ -188,8 +247,21 @@ public class PrepareCommand extends AbstractTransactionBoundaryCommand {
         copy.globalTx = globalTx;
         copy.modifications = modifications == null ? null : modifications.clone();
         copy.onePhaseCommit = onePhaseCommit;
-        copy.readSet = readSet != null ? new HashSet<Object>(readSet) : null;
-        copy.version = version != null ? version.copy() : null;
+        if(readSet != null){
+        	copy.readSet = new Object[readSet.length];
+        	System.arraycopy(readSet, 0, copy.readSet, 0, readSet.length);
+        }
+        else{
+        	copy.readSet = null;
+        }
+        
+        try {
+			copy.version = version != null ? version.clone() : null;
+		} catch (CloneNotSupportedException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			copy.version=null;
+		}
         return copy;
     }
 
@@ -224,11 +296,19 @@ public class PrepareCommand extends AbstractTransactionBoundaryCommand {
         return keys;
     }
 
-    public Set<Object> getReadSet() {
-        return readSet != null ? readSet : Collections.emptySet();
+    public Object[] getReadSet() {
+    	if(readSet == null) return null;
+    	
+    	Object[] result = new Object[readSet.length];
+    	
+        System.arraycopy(readSet, 0, result, 0, readSet.length);
+        
+        return result;
     }
+    
+   
 
     public VersionVC getVersion() {
-        return version != null ? version : VersionVC.EMPTY_VERSION;
+        return version != null ? version : this.versionVCFactory.createVersionVC();
     }
 }

@@ -22,9 +22,11 @@
  */
 package org.infinispan.interceptors;
 
+
 import org.infinispan.commands.AbstractVisitor;
 import org.infinispan.commands.CommandsFactory;
 import org.infinispan.commands.VisitableCommand;
+import org.infinispan.commands.read.GetKeyValueCommand;
 import org.infinispan.commands.tx.CommitCommand;
 import org.infinispan.commands.tx.PrepareCommand;
 import org.infinispan.commands.tx.RollbackCommand;
@@ -39,9 +41,17 @@ import org.infinispan.context.InvocationContext;
 import org.infinispan.context.impl.TxInvocationContext;
 import org.infinispan.distribution.DistributionManager;
 import org.infinispan.factories.annotations.Inject;
+import org.infinispan.jmx.annotations.MBean;
+import org.infinispan.jmx.annotations.ManagedAttribute;
+import org.infinispan.jmx.annotations.ManagedOperation;
+import org.rhq.helpers.pluginAnnotations.agent.DisplayType;
+import org.rhq.helpers.pluginAnnotations.agent.MeasurementType;
+import org.rhq.helpers.pluginAnnotations.agent.Metric;
+import org.rhq.helpers.pluginAnnotations.agent.Operation;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * A special form of the TxInterceptor that is aware of distribution and consistent hashing, and as such only replays
@@ -50,11 +60,16 @@ import java.util.Map;
  * @author Manik Surtani
  * @since 4.0
  */
+@MBean(objectName = "Transactions", description = "Component that manages the cache's participation in JTA transactions.")
 public class DistTxInterceptor extends TxInterceptor {
 
    DistributionManager dm;
    ReplayCommandVisitor replayCommandVisitor = new ReplayCommandVisitor();
    private CommandsFactory commandsFactory;
+   
+   
+   private final AtomicLong nrLocalReadOp = new AtomicLong(0);
+   private final AtomicLong localReadTime = new AtomicLong(0);
 
    @Inject
    public void injectDistributionManager(DistributionManager dm, CommandsFactory commandsFactory) {
@@ -203,5 +218,44 @@ public class DistTxInterceptor extends TxInterceptor {
       } finally {
          dm.getTransactionLogger().afterCommand(command);
       }
+    }
+    
+    @Override
+    public Object visitGetKeyValueCommand(InvocationContext ctx, GetKeyValueCommand command) throws Throwable {
+    	long start = System.nanoTime();
+
+    	boolean isKeyLocal = dm.getLocality(command.getKey()).isLocal();
+    	try {
+    		return super.visitGetKeyValueCommand(ctx, command);
+    	} finally {
+    		if(statisticsEnabled){
+    			long end = System.nanoTime();
+    			if(ctx.isOriginLocal() && isKeyLocal){
+    				localReadTime.addAndGet(end - start);
+    				nrLocalReadOp.incrementAndGet();
+    			}  
+    		}
+    	}
+    }
+    
+    @ManagedOperation(description = "Resets statistics gathered by this component")
+    @Operation(displayName = "Reset Statistics")
+    public void resetStatistics() {
+        super.resetStatistics();
+        
+        nrLocalReadOp.set(0);
+        localReadTime.set(0);
+    }
+    
+    @ManagedAttribute(description = "Number of local read commands since last reset")
+    @Metric(displayName = "NrLocalReadOp", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getNrLocalReadOp() {
+        return this.nrLocalReadOp.get();
+    }
+    
+    @ManagedAttribute(description = "Duration of all local read command since last reset (nano-seconds)")
+    @Metric(displayName = "LocalReadTime", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getLocalReadTime() {
+        return localReadTime.get();
     }
 }

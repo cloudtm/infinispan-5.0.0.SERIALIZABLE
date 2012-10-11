@@ -31,6 +31,7 @@ import org.infinispan.factories.scopes.Scope;
 import org.infinispan.factories.scopes.Scopes;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 
 /**
  * The main internal data structure which stores entries
@@ -141,7 +142,7 @@ public interface DataContainer extends Iterable<InternalCacheEntry> {
      * @param max the maximum version to read
      * @return entry, if it exists and has not expired, or null if not exists
      */
-    InternalMVCCEntry get(Object k, VersionVC max);
+    InternalMVCCEntry get(Object k, VersionVC max, boolean firstTimeOnNode);
 
     /**
      * see {@link #peek(Object k)}
@@ -150,7 +151,7 @@ public interface DataContainer extends Iterable<InternalCacheEntry> {
      * @param max the maximum version to read
      * @return entry, if it exists, or null if not
      */
-    InternalMVCCEntry peek(Object k, VersionVC max);
+    InternalMVCCEntry peek(Object k, VersionVC max, boolean firstTimeOnNode);
 
     /**
      * Puts an entry in the cache along with a lifespan and a maxIdle time
@@ -168,7 +169,7 @@ public interface DataContainer extends Iterable<InternalCacheEntry> {
      * @param max the maximum version to read
      * @return true if entry exists and has not expired; false otherwise
      */
-    boolean containsKey(Object k, VersionVC max);
+    boolean containsKey(Object k, VersionVC max, boolean firstTimeOnNode);
 
     /**
      * Removes an entry from the cache
@@ -184,7 +185,7 @@ public interface DataContainer extends Iterable<InternalCacheEntry> {
      * @param max the maximum version
      * @return count of the number of entries in the container
      */
-    int size(VersionVC max);
+    int size(VersionVC max, boolean firstTimeOnNode);
 
     /**
      * see {@link #clear()}
@@ -199,7 +200,7 @@ public interface DataContainer extends Iterable<InternalCacheEntry> {
      * @param max the maximum version
      * @return a set of keys
      */
-    Set<Object> keySet(VersionVC max);
+    Set<Object> keySet(VersionVC max, boolean firstTimeOnNode);
 
     /**
      * see {@link #values()}
@@ -207,7 +208,7 @@ public interface DataContainer extends Iterable<InternalCacheEntry> {
      * @param max the maximum version
      * @return a set of values contained in the container
      */
-    Collection<Object> values(VersionVC max);
+    Collection<Object> values(VersionVC max, boolean firstTimeOnNode);
 
     /**
      * see {@link #entrySet()}
@@ -222,7 +223,7 @@ public interface DataContainer extends Iterable<InternalCacheEntry> {
      * Note: with the mvcc, it puts a new empty value with the version *version*
      * @param version the new version of the values deleted
      */
-    void purgeExpired(VersionVC version);
+    void purgeExpired(VersionVC version, boolean firstTimeOnNode);
 
     /**
      * TODO
@@ -231,5 +232,5 @@ public interface DataContainer extends Iterable<InternalCacheEntry> {
      * @param value
      * @return
      */
-    boolean validateKey(Object key, int idx, long value);
+    boolean validateKey(Object key, VersionVC version);
 }

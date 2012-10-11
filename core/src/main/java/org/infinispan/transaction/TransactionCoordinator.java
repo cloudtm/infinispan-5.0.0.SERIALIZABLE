@@ -103,14 +103,34 @@ public class TransactionCoordinator {
 
         PrepareCommand prepareCommand;
         if(isTotalOrderReplication) {
-            TotalOrderPrepareCommand tOPrepareCommand = commandsFactory.buildTotalOrderPrepareCommand(localTransaction.getGlobalTransaction(), localTransaction.getModifications());
-            tOPrepareCommand.setOnePhaseCommit(false); //we need a vote phase!
-            prepareCommand = tOPrepareCommand;
-        } else {
+        	throw new RuntimeException("Problem: Total Order notsupported");
+        	/*
             if(useSerializable) {
-                prepareCommand = commandsFactory.buildPrepareCommand(localTransaction.getGlobalTransaction(),
+                TotalOrderPrepareCommand tOPrepareCommand = commandsFactory.buildTotalOrderPrepareCommand(localTransaction.getGlobalTransaction(),
                         localTransaction.getModifications(), localTransaction.getReadSet(),
                         ctx.getPrepareVersion(), configuration.isOnePhaseCommit());
+                tOPrepareCommand.setOnePhaseCommit(false);
+                tOPrepareCommand.setSerializability(true);
+                prepareCommand = tOPrepareCommand;
+            } else {
+                TotalOrderPrepareCommand tOPrepareCommand = commandsFactory.buildTotalOrderPrepareCommand(localTransaction.getGlobalTransaction(), localTransaction.getModifications());
+                tOPrepareCommand.setOnePhaseCommit(false); //we need a vote phase!
+                prepareCommand = tOPrepareCommand;
+            }
+            */
+        } else {
+            if(useSerializable) {
+            	if(configuration.getCacheMode().isDistributed()){
+            		
+            		prepareCommand = commandsFactory.buildPrepareCommand(localTransaction.getGlobalTransaction(),
+                            localTransaction.getModifications(), localTransaction.getRemoteReadSet(),
+                            ctx.getPrepareVersion(), configuration.isOnePhaseCommit());
+            	}
+            	else{
+            		prepareCommand = commandsFactory.buildPrepareCommand(localTransaction.getGlobalTransaction(),
+                        localTransaction.getModifications(), localTransaction.getLocalReadSet(),
+                        ctx.getPrepareVersion(), configuration.isOnePhaseCommit());
+            	}
             } else {
                 prepareCommand = commandsFactory.buildPrepareCommand(localTransaction.getGlobalTransaction(), localTransaction.getModifications(), configuration.isOnePhaseCommit());
             }
@@ -145,7 +165,7 @@ public class TransactionCoordinator {
 
             boolean totalOrderOnePhase = isTotalOrderReplication && (!RRwithWriteSkew || !remoteWriteSkewNeeded(localTransaction));
 
-            if(totalOrderOnePhase) {
+            if(totalOrderOnePhase && configuration.getIsolationLevel() != IsolationLevel.SERIALIZABLE) {
                 validateNotMarkedForRollback(localTransaction);
 
                 if (trace) log.trace("Doing an 1PC prepare call on the interceptor chain");

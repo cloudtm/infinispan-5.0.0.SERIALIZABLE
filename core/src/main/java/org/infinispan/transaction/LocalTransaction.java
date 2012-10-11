@@ -26,6 +26,7 @@ package org.infinispan.transaction;
 import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.ReadSetEntry;
 import org.infinispan.mvcc.VersionVC;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.transaction.xa.GlobalTransaction;
@@ -57,6 +58,10 @@ public abstract class LocalTransaction extends AbstractCacheTransaction {
     private final Transaction transaction;
 
     private VersionVC commitVersion;
+
+    private boolean locallyValidated = false;
+    
+    
 
     public LocalTransaction(Transaction transaction, GlobalTransaction tx) {
         super.tx = tx;
@@ -126,6 +131,8 @@ public abstract class LocalTransaction extends AbstractCacheTransaction {
     public boolean isReadOnly() {
         return (modifications == null || modifications.isEmpty()) && (lookedUpEntries == null || lookedUpEntries.isEmpty());
     }
+    
+    
 
     public abstract boolean isEnlisted();
 
@@ -166,12 +173,66 @@ public abstract class LocalTransaction extends AbstractCacheTransaction {
     }
 
     @Override
-    public void addReadKey(Object key, InternalMVCCEntry ime) {
-        if(readSet == null) {
-            readSet = new HashMap<Object, InternalMVCCEntry>();
+    public void addLocalReadKey(Object key, InternalMVCCEntry ime) {
+        if(localReadSet == null) {
+            localReadSet = new LinkedList<ReadSetEntry>();
         }
-        readSet.put(key, ime);
+        localReadSet.addLast(new ReadSetEntry(key, ime));
     }
+    
+    @Override
+    public void removeLocalReadKey(Object key) {
+        if(localReadSet != null){
+        	Iterator<ReadSetEntry> itr = localReadSet.descendingIterator();
+        	while(itr.hasNext()){
+        		ReadSetEntry entry = itr.next();
+        		
+        		if(entry.getKey() != null && entry.getKey().equals(key)){
+        			itr.remove();
+        			break;
+        		}
+        	}
+        }	
+    }
+    
+    @Override
+    public void removeRemoteReadKey(Object key){
+    	
+    	if(remoteReadSet != null){
+        	Iterator<ReadSetEntry> itr = remoteReadSet.descendingIterator();
+        	while(itr.hasNext()){
+        		ReadSetEntry entry = itr.next();
+        		
+        		if(entry.getKey() != null && entry.getKey().equals(key)){
+        			itr.remove();
+        			break;
+        		}
+        	}
+        }
+    }
+    
+    @Override
+    public void addRemoteReadKey(Object key, InternalMVCCEntry ime) {
+        if(remoteReadSet == null) {
+            remoteReadSet = new LinkedList<ReadSetEntry>();
+        }
+        remoteReadSet.addLast(new ReadSetEntry(key, ime));
+    }
+    
+    
+	public void setLastReadKey(CacheEntry entry){
+		this.lastReadKey = entry;
+	}
+
+	
+	public CacheEntry getLastReadKey(){
+		return this.lastReadKey;
+	}
+
+	
+	public void clearLastReadKey(){
+		this.lastReadKey = null;
+	}
 
     public void setCommitVersion(VersionVC version) {
         this.commitVersion = version;
@@ -179,5 +240,13 @@ public abstract class LocalTransaction extends AbstractCacheTransaction {
 
     public VersionVC getCommitVersion() {
         return commitVersion;
+    }
+
+    public boolean isLocallyValidated(){
+        return this.locallyValidated;
+    }
+
+    public void markLocallyValidated(){
+        this.locallyValidated = true;
     }
 }

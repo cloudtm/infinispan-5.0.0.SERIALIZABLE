@@ -22,8 +22,11 @@
  */
 package org.infinispan.context;
 
+
+import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.remoting.transport.Address;
 
 import java.util.Set;
@@ -75,13 +78,33 @@ public interface InvocationContext extends EntryLookup, FlagContainer, Cloneable
 
     void setReadBasedOnVersion(boolean value);
 
-    void addReadKey(Object key, InternalMVCCEntry ime);
+    void addRemoteReadKey(Object key, InternalMVCCEntry ime);
+    
+    void addLocalReadKey(Object key, InternalMVCCEntry ime);
+    
+    void removeLocalReadKey(Object key);
+    
+    void removeRemoteReadKey(Object key);
 
-    InternalMVCCEntry getReadKey(Object Key);
+    InternalMVCCEntry getLocalReadKey(Object Key);
+    
+    InternalMVCCEntry getRemoteReadKey(Object Key);
 
-    VersionVC calculateVersionToRead();
+    VersionVC calculateVersionToRead(VersionVCFactory versionVCFactory);
 
     VersionVC getPrepareVersion();
 
     void setVersionToRead(VersionVC version);
+    
+    void setAlreadyReadOnNode(boolean alreadyRead);
+    
+    boolean getAlreadyReadOnNode();
+    
+    void setLastReadKey(CacheEntry entry);
+    
+    CacheEntry getLastReadKey();
+    
+    void clearLastReadKey();
+    
+    
 }

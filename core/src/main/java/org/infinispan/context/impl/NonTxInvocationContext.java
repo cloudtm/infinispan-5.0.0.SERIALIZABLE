@@ -24,12 +24,17 @@ package org.infinispan.context.impl;
 
 import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.ReadSetEntry;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.util.BidirectionalLinkedHashMap;
 import org.infinispan.util.BidirectionalMap;
 import org.infinispan.util.InfinispanCollections;
 
+import java.util.Deque;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.Map;
 
 /**
@@ -45,7 +50,12 @@ public class NonTxInvocationContext extends AbstractInvocationContext {
     //for serializability
     private boolean readBasedOnVersion = false;
     private VersionVC versionVC = null;
-    private Map<Object, InternalMVCCEntry> readKeys = new HashMap<Object, InternalMVCCEntry>();
+    
+    protected Deque<ReadSetEntry> readKeys = new LinkedList<ReadSetEntry>();
+    
+    private CacheEntry lastReadKey = null;
+    
+    private boolean alreadyReadOnNode = false;
 
     public CacheEntry lookupEntry(Object k) {
         return lookedUpEntries == null ? null : lookedUpEntries.get(k);
@@ -111,7 +121,7 @@ public class NonTxInvocationContext extends AbstractInvocationContext {
             dolly.lookedUpEntries = new BidirectionalLinkedHashMap<Object, CacheEntry>(lookedUpEntries);
         }
         if(readKeys != null) {
-            dolly.readKeys = new HashMap<Object, InternalMVCCEntry>(readKeys);
+            dolly.readKeys = new LinkedList<ReadSetEntry>(readKeys);
         }
         dolly.readBasedOnVersion = readBasedOnVersion;
         dolly.versionVC = versionVC;
@@ -132,25 +142,97 @@ public class NonTxInvocationContext extends AbstractInvocationContext {
     public void setVersionToRead(VersionVC version) {
         versionVC = version;
     }
-
+    
     @Override
-    public void addReadKey(Object key, InternalMVCCEntry ime) {
-        readKeys.put(key, ime);
+    public void addLocalReadKey(Object key, InternalMVCCEntry ime) {
+        readKeys.addLast(new ReadSetEntry(key, ime));
+    }
+    
+    @Override
+    public void removeLocalReadKey(Object key) {
+    	if(readKeys != null){
+        	Iterator<ReadSetEntry> itr = readKeys.descendingIterator();
+        	while(itr.hasNext()){
+        		ReadSetEntry entry = itr.next();
+        		
+        		if(entry.getKey() != null && entry.getKey().equals(key)){
+        			itr.remove();
+        			break;
+        		}
+        	}
+        }
+    }
+    
+    @Override
+    public void removeRemoteReadKey(Object key) {
+    	
+    	//no-op
+    }
+    
+    @Override
+    public void addRemoteReadKey(Object key, InternalMVCCEntry ime) {
+        //no-op
     }
 
     @Override
-    public InternalMVCCEntry getReadKey(Object key) {
-        return readKeys.get(key);
+    public InternalMVCCEntry getLocalReadKey(Object key) {
+    	return readKeys == null ? null : find(readKeys, key);
     }
+    
+    private InternalMVCCEntry find(Deque<ReadSetEntry> d, Object key){
+    	if(d != null){
+        	Iterator<ReadSetEntry> itr = d.descendingIterator();
+        	while(itr.hasNext()){
+        		ReadSetEntry entry = itr.next();
+        		
+        		if(entry.getKey() != null && entry.getKey().equals(key)){
+        			return entry.getIme();
+        		}
+        	}
+        }
+    	
+    	return null;
+    }
+    
+    @Override
+    public InternalMVCCEntry getRemoteReadKey(Object key) {
+        return null;
+    }
+    
 
     @Override
-    public VersionVC calculateVersionToRead() {
+    public VersionVC calculateVersionToRead(VersionVCFactory versionVCFactory) {
         return versionVC;
+    }
+    
+    @Override
+    public void setAlreadyReadOnNode(boolean alreadyRead){
+    	this.alreadyReadOnNode = alreadyRead;
+    }
+    
+    @Override
+    public boolean getAlreadyReadOnNode(){
+    	return this.alreadyReadOnNode;
     }
 
     private void resetMultiVersion() {
         readBasedOnVersion = false;
         versionVC = null;
         readKeys.clear();
+    }
+    
+    @Override
+    public void setLastReadKey(CacheEntry entry){
+    	this.lastReadKey = entry;
+    }
+    
+    @Override
+    public CacheEntry getLastReadKey(){
+    	return this.lastReadKey;
+    }
+    
+    @Override
+    public void clearLastReadKey(){
+    	this.lastReadKey = null;
     }
 }

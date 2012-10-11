@@ -80,18 +80,21 @@ public class TxInterceptor extends CommandInterceptor {
     private final AtomicLong failedPrepareTime = new AtomicLong(0);
     private final AtomicLong nrSuccessPrepare = new AtomicLong(0);
     private final AtomicLong nrFailedPrepare = new AtomicLong(0);
-    private final AtomicLong commitTime = new AtomicLong(0);
-    private final AtomicLong nrCommit = new AtomicLong(0);
+    private final AtomicLong remoteCommitTime = new AtomicLong(0);
+    private final AtomicLong nrRemoteCommit = new AtomicLong(0);
     private final AtomicLong rollbackTime = new AtomicLong(0);
     private final AtomicLong nrRollback = new AtomicLong(0);
     //this is only for local commands
     private final AtomicLong rollbacksDueToUnableAcquireLock = new AtomicLong(0);
     private final AtomicLong rollbacksDueToDeadLock = new AtomicLong(0);
     //read operation
-    private final AtomicLong localReadTime = new AtomicLong(0);
+    private final AtomicLong readTime = new AtomicLong(0);
     private final AtomicLong remoteReadTime = new AtomicLong(0);
-    private final AtomicLong nrLocalReadOp = new AtomicLong(0);
+    private final AtomicLong nrReadOp = new AtomicLong(0);
     private final AtomicLong nrRemoteReadOp = new AtomicLong(0);
+    
+    private final AtomicLong localCommitTime = new AtomicLong(0);
+    private final AtomicLong nrLocalCommit = new AtomicLong(0);
 
 
     @ManagedAttribute(description = "Enables or disables the gathering of statistics by this component", writable = true)
@@ -137,6 +140,10 @@ public class TxInterceptor extends CommandInterceptor {
                 transactionLog.logPrepare(command);
             }
             if (this.statisticsEnabled) prepares.incrementAndGet();
+
+
+
+
             Object result = invokeNextInterceptor(ctx, command);
             if (command.isOnePhaseCommit()) {
                 transactionLog.logOnePhaseCommit(ctx.getGlobalTransaction(), command.getModifications());
@@ -148,6 +155,7 @@ public class TxInterceptor extends CommandInterceptor {
                     txTable.remoteTransactionPrepared(command.getGlobalTransaction());
                 }
             }
+
             return result;
         } catch(TimeoutException e) {
             successful = false;
@@ -187,10 +195,16 @@ public class TxInterceptor extends CommandInterceptor {
             transactionLog.logCommit(command.getGlobalTransaction());
             return result;
         } finally {
-            if(statisticsEnabled && !ctx.isOriginLocal()) {
+            if(statisticsEnabled) {
                 long end = System.nanoTime();
-                commitTime.addAndGet(end - start);
-                nrCommit.incrementAndGet();
+                if(!ctx.isOriginLocal()){
+                remoteCommitTime.addAndGet(end - start);
+                nrRemoteCommit.incrementAndGet();
+                }
+                else{
+                	localCommitTime.addAndGet(end - start);
+                	nrLocalCommit.incrementAndGet();
+                }
             }
         }
     }
@@ -258,8 +272,8 @@ public class TxInterceptor extends CommandInterceptor {
             if(statisticsEnabled) {
                 long end = System.nanoTime();
                 if(ctx.isOriginLocal()) {
-                    localReadTime.addAndGet(end - start);
-                    nrLocalReadOp.incrementAndGet();
+                    readTime.addAndGet(end - start);
+                    nrReadOp.incrementAndGet();
                 } else {
                     remoteReadTime.addAndGet(end - start);
                     nrRemoteReadOp.incrementAndGet();
@@ -268,7 +282,7 @@ public class TxInterceptor extends CommandInterceptor {
         }
     }
 
-    private Object enlistReadAndInvokeNext(InvocationContext ctx, VisitableCommand command) throws Throwable {
+    protected Object enlistReadAndInvokeNext(InvocationContext ctx, VisitableCommand command) throws Throwable {
         if (shouldEnlist(ctx)) {
             LocalTransaction localTransaction = enlist(ctx);
             LocalTxInvocationContext localTxContext = (LocalTxInvocationContext) ctx;
@@ -335,16 +349,18 @@ public class TxInterceptor extends CommandInterceptor {
         failedPrepareTime.set(0);
         nrSuccessPrepare.set(0);
         nrFailedPrepare.set(0);
-        commitTime.set(0);
-        nrCommit.set(0);
+        remoteCommitTime.set(0);
+        nrRemoteCommit.set(0);
         rollbackTime.set(0);
         nrRollback.set(0);
         rollbacksDueToUnableAcquireLock.set(0);
         rollbacksDueToDeadLock.set(0);
-        localReadTime.set(0);
+        readTime.set(0);
         remoteReadTime.set(0);
-        nrLocalReadOp.set(0);
+        nrReadOp.set(0);
         nrRemoteReadOp.set(0);
+        localCommitTime.set(0);
+    	nrLocalCommit.set(0);
     }
 
     @Operation(displayName = "Enable/disable statistics")
@@ -400,15 +416,27 @@ public class TxInterceptor extends CommandInterceptor {
     }
 
     @ManagedAttribute(description = "Duration of all remote commit command since last reset (nano-seconds)")
-    @Metric(displayName = "CommitTime", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
-    public long getCommitTime() {
-        return commitTime.get();
+    @Metric(displayName = "RemoteCommitTime", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getRemoteCommitTime() {
+        return remoteCommitTime.get();
     }
 
     @ManagedAttribute(description = "Number of remote commit command performed since last reset")
-    @Metric(displayName = "NrCommit", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
-    public long getNrCommit() {
-        return nrCommit.get();
+    @Metric(displayName = "NrRemoteCommit", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getNrRemoteCommit() {
+        return nrRemoteCommit.get();
+    }
+    
+    @ManagedAttribute(description = "Duration of all local commit command since last reset (nano-seconds)")
+    @Metric(displayName = "LocalCommitTime", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getLocalCommitTime() {
+        return localCommitTime.get();
+    }
+
+    @ManagedAttribute(description = "Number of local commit command performed since last reset")
+    @Metric(displayName = "NrLocalCommit", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getNrLocalCommit() {
+        return nrLocalCommit.get();
     }
 
     @ManagedAttribute(description = "Duration of all remote rollback command since last reset (nano-seconds)")
@@ -441,10 +469,10 @@ public class TxInterceptor extends CommandInterceptor {
         return 0;
     }
 
-    @ManagedAttribute(description = "Duration of all local read command since last reset (nano-seconds)")
-    @Metric(displayName = "LocalReadTime", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
-    public long getLocalReadTime() {
-        return localReadTime.get();
+    @ManagedAttribute(description = "Duration of all read command since last reset (nano-seconds)")
+    @Metric(displayName = "ReadTime", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getReadTime() {
+        return readTime.get();
     }
 
     @ManagedAttribute(description = "Duration of all remote read command since last reset (nano-seconds)")
@@ -453,16 +481,28 @@ public class TxInterceptor extends CommandInterceptor {
         return remoteReadTime.get();
     }
 
-    @ManagedAttribute(description = "Number of local read commands since last reset")
-    @Metric(displayName = "NrLocalReadOp", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
-    public long getNrLocalReadOp() {
-        return nrLocalReadOp.get();
+    @ManagedAttribute(description = "Number of read commands since last reset")
+    @Metric(displayName = "NrReadOp", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getNrReadOp() {
+        return nrReadOp.get();
     }
 
     @ManagedAttribute(description = "Number of remote read commands since last reset")
     @Metric(displayName = "NrRemoteReadOp", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
     public long getNrRemoteReadOp() {
         return nrRemoteReadOp.get();
+    }
+    
+    @ManagedAttribute(description = "Number of successful read-write locks acquisitions")
+    @Metric(displayName = "NrRWLocksAcquisitions", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getNrRWLocksAcquisitions() {
+        return 0L;
+    }
+    
+    @ManagedAttribute(description = "Total duration of successful read-write locks acquisitions since last reset (nanoseconds)")
+    @Metric(displayName = "RWLocksAcquisitionTime", measurementType = MeasurementType.TRENDSUP, displayType = DisplayType.SUMMARY)
+    public long getRWLocksAcquisitionTime() {
+        return 0L;
     }
 
     /**

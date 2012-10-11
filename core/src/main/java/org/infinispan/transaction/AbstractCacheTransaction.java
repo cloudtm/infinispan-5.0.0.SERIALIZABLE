@@ -26,7 +26,9 @@ package org.infinispan.transaction;
 import org.infinispan.commands.write.WriteCommand;
 import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.mvcc.InternalMVCCEntry;
+import org.infinispan.mvcc.ReadSetEntry;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.transaction.xa.CacheTransaction;
 import org.infinispan.transaction.xa.GlobalTransaction;
 import org.infinispan.util.BidirectionalLinkedHashMap;
@@ -51,9 +53,19 @@ public abstract class AbstractCacheTransaction implements CacheTransaction {
     protected GlobalTransaction tx;
     protected Set<Object> affectedKeys = null;
 
-    //changes by Pedro: added a read-set, bit set and version and their manipulation
-    protected Map<Object, InternalMVCCEntry> readSet;
+    //changes by Pedro & Sebastiano: added a read-set, bit set and version and their manipulation
+    
+    protected Deque<ReadSetEntry> localReadSet;
+    protected Deque<ReadSetEntry> remoteReadSet;
+    
+    
     protected BitSet alreadyRead = new BitSet();
+    //protected BitSet realAlreadyRead = new BitSet();
+    protected boolean alreadyReadOnNode=false;
+    
+    protected CacheEntry lastReadKey = null;
+    
+    
     protected VersionVC vectorClock;
 
     protected volatile boolean prepared;
@@ -98,20 +110,73 @@ public abstract class AbstractCacheTransaction implements CacheTransaction {
     public void setAffectedKeys(Set<Object> affectedKeys) {
         this.affectedKeys = affectedKeys;
     }
-
-    public void setReadSet(Map<Object, InternalMVCCEntry> readSet) {
-        this.readSet = readSet;
+    
+    public void setAlreadyReadOnNode(boolean value){
+    	this.alreadyReadOnNode = value;
+    }
+    
+    public boolean getAlreadyReadOnNode(){
+    	return this.alreadyReadOnNode;
     }
 
-    public InternalMVCCEntry getReadKey(Object key) {
-        return readSet == null ? null : readSet.get(key);
+    public InternalMVCCEntry getLocalReadKey(Object key) {
+        return localReadSet == null ? null : find(localReadSet, key);
+    }
+    
+    public InternalMVCCEntry getRemoteReadKey(Object key) {
+        return remoteReadSet == null ? null : find(remoteReadSet, key);
     }
 
-    public Set<Object> getReadSet() {
-        return readSet != null ? new HashSet<Object>(readSet.keySet()) : Collections.emptySet();
+    public Object[] getLocalReadSet() {
+    	return filterKeys(localReadSet);
+    }
+    
+    public Object[] getRemoteReadSet() {
+    	
+        return filterKeys(remoteReadSet);
+    }
+    
+    private InternalMVCCEntry find(Deque<ReadSetEntry> d, Object key){
+    	if(d != null){
+        	Iterator<ReadSetEntry> itr = d.descendingIterator();
+        	while(itr.hasNext()){
+        		ReadSetEntry entry = itr.next();
+        		
+        		if(entry.getKey() != null && entry.getKey().equals(key)){
+        			return entry.getIme();
+        		}
+        	}
+        }
+    	
+    	return null;
+    }
+    
+    private Object[] filterKeys(Deque<ReadSetEntry> d){
+    	
+    	if(d == null || d.isEmpty()) return null;
+    	
+    	
+    	Object[] result = new Object[d.size()];
+    	
+        Iterator<ReadSetEntry> itr = d.iterator();
+        int i=0;
+        while(itr.hasNext()){
+        		result[i] = itr.next().getKey();
+        		
+        		i++;
+        }
+        
+    	
+    	return result;
     }
 
-    public abstract void addReadKey(Object key, InternalMVCCEntry ime);
+    public abstract void addLocalReadKey(Object key, InternalMVCCEntry ime);
+    
+    public abstract void removeLocalReadKey(Object key);
+    
+    public abstract void removeRemoteReadKey(Object key);
+    
+    public abstract void addRemoteReadKey(Object key, InternalMVCCEntry ime);
 
     public boolean hasAlreadyReadFrom(int idx) {
         return alreadyRead != null && alreadyRead.get(idx);
@@ -120,37 +185,70 @@ public abstract class AbstractCacheTransaction implements CacheTransaction {
     public void setAlreadyRead(int idx) {
         alreadyRead.set(idx);
     }
+    
+    
+    
+    public BitSet getAlreadyRead(){
+    	return (BitSet) alreadyRead.clone();
+    }
 
-    public void initVectorClock(VersionVC vc) {
+    public void initVectorClock(VersionVCFactory versionVCFactory, VersionVC vc) {
         if(vectorClock == null) {
-            vectorClock = new VersionVC();
+            vectorClock = versionVCFactory.createVersionVC();
         }
         vectorClock.setToMaximum(vc);
+        int idx = versionVCFactory.getMyIndex();
+        alreadyRead.set(idx);
+        
+        
+        if(vectorClock.get(idx) == VersionVC.EMPTY_POSITION){
+			vectorClock.set(versionVCFactory, idx, 0L);
+		}  
+        
+        this.alreadyReadOnNode = true; //because we don't want to search in the CommitLog. See MultiVersionDataContainer.get(...)
+        
+        
+        
     }
 
     public void updateVectorClock(VersionVC other) {
         vectorClock.setToMaximum(other);
     }
-
-    public long getValueFrom(int idx) {
-        return vectorClock != null ? vectorClock.get(idx) : VersionVC.EMPTY_POSITION;
+    
+    public void setVectorClockValueIn(VersionVCFactory versionVCFactory, int pos, long value){
+    	versionVCFactory.translateAndSet(vectorClock, pos, value);
     }
 
-    public VersionVC calculateVectorClockToRead() {
-        VersionVC vc = new VersionVC();
+    public long getValueFrom(VersionVCFactory versionVCFactory, int idx) {
+        return vectorClock != null ? versionVCFactory.translateAndGet(vectorClock,idx) : VersionVC.EMPTY_POSITION;
+    }
+
+    public VersionVC calculateVectorClockToRead(VersionVCFactory versionVCFactory) {
+    	
+    	VersionVC vc = versionVCFactory.createVisibleVersionVC(vectorClock, alreadyRead);
+    	/*
+        VersionVC vc= versionVCFactory.createVersionVC();
         for(int i = 0; i < alreadyRead.length(); ++i) {
             if(alreadyRead.get(i)) {
-                vc.set(i, vectorClock.get(i));
+                versionVCFactory.translateAndSet(vc,i, versionVCFactory.translateAndGet(vectorClock,i));
             }
         }
+        */
         return vc;
     }
 
     public VersionVC getPrepareVectorClock() {
-        return vectorClock.copy();
+        try {
+			return vectorClock.clone();
+		} catch (CloneNotSupportedException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			return null;
+		}
     }
 
-    public VersionVC getMinVersion(Set<Integer> positions) {
-        return vectorClock.copy(positions);
+    public VersionVC getMinVersion() {
+        return this.vectorClock;
     }
+   
 }

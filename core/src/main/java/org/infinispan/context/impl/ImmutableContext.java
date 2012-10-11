@@ -25,6 +25,7 @@ import org.infinispan.context.Flag;
 import org.infinispan.context.InvocationContext;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.remoting.transport.Address;
 import org.infinispan.util.BidirectionalMap;
 import org.infinispan.util.InfinispanCollections;
@@ -152,17 +153,37 @@ public final class ImmutableContext implements InvocationContext {
     }
 
     @Override
-    public void addReadKey(Object key, InternalMVCCEntry ime) {
+    public void addLocalReadKey(Object key, InternalMVCCEntry ime) {
+        //no-op by default
+    }
+    
+    @Override
+    public void removeLocalReadKey(Object key) {
+        //no-op by default
+    }
+    
+    @Override
+    public void removeRemoteReadKey(Object key) {
+        //no-op by default
+    }
+    
+    @Override
+    public void addRemoteReadKey(Object key, InternalMVCCEntry ime) {
         //no-op by default
     }
 
     @Override
-    public InternalMVCCEntry getReadKey(Object Key) {
+    public InternalMVCCEntry getLocalReadKey(Object Key) {
+        return null;
+    }
+    
+    @Override
+    public InternalMVCCEntry getRemoteReadKey(Object Key) {
         return null;
     }
 
     @Override
-    public VersionVC calculateVersionToRead() {
+    public VersionVC calculateVersionToRead(VersionVCFactory versionVCFactory) {
         return null;
     }
 
@@ -174,6 +195,31 @@ public final class ImmutableContext implements InvocationContext {
     @Override
     public void setVersionToRead(VersionVC version) {
         //no-op by default
+    }
+    
+    @Override
+    public void setAlreadyReadOnNode(boolean alreadyRead){
+    	//no-op
+    }
+    
+    @Override
+	public void setLastReadKey(CacheEntry entry){
+		//no-op
+	}
+
+	@Override
+	public CacheEntry getLastReadKey(){
+		return null;
+	}
+
+	@Override
+	public void clearLastReadKey(){
+		//no-op
+	}
+    
+    @Override
+    public boolean getAlreadyReadOnNode(){
+    	return false;
     }
 
     @Override

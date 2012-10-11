@@ -3,6 +3,7 @@ package org.infinispan.interceptors;
 import org.infinispan.commands.tx.AcquireValidationLocksCommand;
 import org.infinispan.commands.tx.CommitCommand;
 import org.infinispan.commands.tx.RollbackCommand;
+import org.infinispan.commands.tx.TotalOrderPrepareCommand;
 import org.infinispan.container.MultiVersionDataContainer;
 import org.infinispan.container.entries.CacheEntry;
 import org.infinispan.container.entries.SerializableEntry;
@@ -12,6 +13,7 @@ import org.infinispan.factories.annotations.Inject;
 import org.infinispan.marshall.MarshalledValue;
 import org.infinispan.mvcc.CommitQueue;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.mvcc.exception.ValidationException;
 import org.infinispan.util.ReversibleOrderedSet;
 import org.infinispan.util.Util;
@@ -29,10 +31,12 @@ import java.util.Map;
 public class SerialLockingInterceptor extends LockingInterceptor implements CommitQueue.CommitInstance {
 
     private CommitQueue commitQueue;
+    private VersionVCFactory versionVCFactory;
 
     @Inject
-    public void inject(CommitQueue commitQueue) {
+    public void inject(CommitQueue commitQueue, VersionVCFactory versionVCFactory) {
         this.commitQueue = commitQueue;
+        this.versionVCFactory=versionVCFactory;
     }
 
     @Override
@@ -47,7 +51,7 @@ public class SerialLockingInterceptor extends LockingInterceptor implements Comm
                     ((ReadWriteLockManager)lockManager).unlockAfterCommit(ctx);
                 } catch(Exception e) {
                     e.printStackTrace();
-                    commitQueue.remove(command.getGlobalTransaction());
+                    commitQueue.remove(command.getGlobalTransaction(), true);
                 }
             } else {
                 throw new IllegalStateException("Attempting to do a commit or rollback but there is no transactional context in scope. " + ctx);
@@ -57,7 +61,7 @@ public class SerialLockingInterceptor extends LockingInterceptor implements Comm
 
     @Override
     public Object visitRollbackCommand(TxInvocationContext ctx, RollbackCommand command) throws Throwable {
-        commitQueue.remove(command.getGlobalTransaction());
+        commitQueue.remove(command.getGlobalTransaction(), false);
         try {
             return invokeNextInterceptor(ctx, command);
         } finally {
@@ -125,8 +129,13 @@ public class SerialLockingInterceptor extends LockingInterceptor implements Comm
         }
     }
 
+    @Override
+    public Object visitTotalOrderPrepareCommand(TxInvocationContext ctx, TotalOrderPrepareCommand command) throws Throwable {
+        return visitPrepareCommand(ctx, command);
+    }
+
     protected void validateKey(Object key, VersionVC toCompare) {
-        if(!dataContainer.validateKey(key, 0, toCompare.get(0))) {
+        if(!dataContainer.validateKey(key, toCompare)) {
             throw new ValidationException("validation of key [" + key + "] failed!");
         }
     }
@@ -195,8 +204,10 @@ public class SerialLockingInterceptor extends LockingInterceptor implements Comm
         ((MultiVersionDataContainer) dataContainer).addNewCommittedTransaction(commitVC);
     }
 
+    /*
     @Override
     public void addTransaction(List<VersionVC> commitVC) {
         ((MultiVersionDataContainer) dataContainer).addNewCommittedTransaction(commitVC);
     }
+    */
 }

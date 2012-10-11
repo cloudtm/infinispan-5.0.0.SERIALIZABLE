@@ -34,10 +34,12 @@ import org.infinispan.interceptors.InterceptorChain;
 import org.infinispan.mvcc.CommitLog;
 import org.infinispan.mvcc.InternalMVCCEntry;
 import org.infinispan.mvcc.VersionVC;
+import org.infinispan.mvcc.VersionVCFactory;
 import org.infinispan.util.concurrent.IsolationLevel;
 import org.infinispan.util.logging.Log;
 import org.infinispan.util.logging.LogFactory;
 
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Set;
@@ -68,7 +70,9 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
 
     private VersionVC minVersion = null; //with null, it does not waits for anything and return a value compatible with maxVC
     private VersionVC maxVersion = null; //read the most recent version (in tx context, this is not null)
+    private BitSet alreadyReadMask = null;
     private CommitLog commitLog;
+    private transient VersionVCFactory versionVCFactory;
 
     public ClusteredGetCommand() {
     }
@@ -85,12 +89,13 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
 
     public void initialize(InvocationContextContainer icc, CommandsFactory commandsFactory,
                            InterceptorChain interceptorChain, DistributionManager distributionManager,
-                           CommitLog commitLog) {
+                           CommitLog commitLog, VersionVCFactory versionVCFactory) {
         this.distributionManager = distributionManager;
         this.icc = icc;
         this.commandsFactory = commandsFactory;
         this.invoker = interceptorChain;
         this.commitLog = commitLog;
+        this.versionVCFactory = versionVCFactory;
     }
 
     /**
@@ -114,15 +119,22 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
             useMultiVersion = true;
             invocationContext.setReadBasedOnVersion(true);
             invocationContext.setVersionToRead(maxVersion);
+            
 
             long timeout = configuration.getSyncReplTimeout();
-            int pos = distributionManager.getSelfID();
-            if(!commitLog.waitUntilMinVersionIsGuaranteed(minVersion, pos, timeout)) {
-                if(log.isInfoEnabled()) {
-                    log.infof("Receive remote get request, but the value wanted is not available. key: %s," +
-                            "min version: %s, max version: %s", key, minVersion, maxVersion);
-                }
-                return null; //no version available
+           
+            boolean alreadyReadOnThisNode = this.alreadyReadMask.get(versionVCFactory.getMyIndex());
+            
+            invocationContext.setAlreadyReadOnNode(alreadyReadOnThisNode);
+            
+            if(!alreadyReadOnThisNode){
+            	if(!commitLog.waitUntilMinVersionIsGuaranteed(minVersion, timeout)) {
+
+            		log.warnf("Receive remote get request, but the value wanted is not available. key: %s," +
+            				"min version: %s, max version: %s", key, minVersion, maxVersion);
+
+            		return null; //no version available
+            	}
             }
         }
 
@@ -144,13 +156,7 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
             return getValueForWeakConsistency((CacheEntry) cacheEntry);
         }
 
-        //TODO with serializability:
-        /*
-         * 1 - wait until commitLog's most recent version has a version higher than min version
-         * 1.1 - wait for how much time?? (sync timeout)
-         * 2 - set the max version somewhere and read the key (don't forger to return an InternalMVCCEntry)
-         * 3 - send it back
-         */
+       
     }
 
     private InternalCacheValue getValueForWeakConsistency(CacheEntry cacheEntry) {
@@ -170,7 +176,7 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
     }
 
     public Object[] getParameters() {
-        return new Object[]{key, cacheName, minVersion, maxVersion, flags};
+        return new Object[]{key, cacheName, minVersion, maxVersion, alreadyReadMask, flags};
     }
 
     public void setParameters(int commandId, Object[] args) {
@@ -178,8 +184,9 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
         cacheName = (String) args[1];
         minVersion = (VersionVC) args[2];
         maxVersion = (VersionVC) args[3];
-        if (args.length>4) {
-            this.flags = (Set<Flag>) args[4];
+        alreadyReadMask = (BitSet) args[4];
+        if (args.length>5) {
+            this.flags = (Set<Flag>) args[5];
         }
     }
 
@@ -235,5 +242,9 @@ public class ClusteredGetCommand extends BaseRpcCommand implements FlagAffectedC
 
     public void setMaxVersion(VersionVC maxVersion) {
         this.maxVersion = maxVersion;
+    }
+    
+    public void setAlreadyReadMask(BitSet alreadyReadMask){
+    	this.alreadyReadMask = alreadyReadMask;
     }
 }

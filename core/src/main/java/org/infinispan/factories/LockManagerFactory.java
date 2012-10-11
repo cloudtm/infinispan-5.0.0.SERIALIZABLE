@@ -37,7 +37,7 @@ import org.infinispan.util.concurrent.locks.readwritelock.ReadWriteLockManagerIm
  * @author Manik Surtani (<a href="mailto:manik@jboss.org">manik@jboss.org</a>)
  * @since 4.0
  */
-@DefaultFactoryFor(classes = {LockManager.class, ReadWriteLockManager.class})
+@DefaultFactoryFor(classes = {LockManager.class})
 public class LockManagerFactory extends AbstractNamedCacheComponentFactory implements AutoInstantiableFactory {
     public <T> T construct(Class<T> componentType) {
         if(configuration.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
